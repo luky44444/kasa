@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f3efe6" />
+    <title>Kasa login</title>
+    <script>
+      (function () {
+        try {
+          var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="login">
+      <form id="loginForm">
+        <h1>Kasa</h1>
+        <p>This ledger is locked. Enter the password from APP_PASSWORD.</p>
+        <p class="error hidden" id="error">Wrong password.</p>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autofocus required />
+        </div>
+        <button type="submit">Open</button>
+      </form>
+    </main>
+    <script>
+      document.getElementById("loginForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const password = document.getElementById("password").value;
+        const response = await fetch("/api/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        if (!response.ok) {
+          document.getElementById("error").classList.remove("hidden");
+          return;
+        }
+        location.href = "/";
+      });
+    </script>
+  </body>
+</html>

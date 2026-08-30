@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <meta name="theme-color" content="#f3efe6" id="themeColor" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Kasa</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" />
+    <link rel="stylesheet" href="/app.css" />
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem("kasa-theme") || "system";
+          var dark =
+            pref === "dark" ||
+            (pref !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <main class="page">
+      <header class="mast">
+        <div class="kicker-row">
+          <p class="kicker">Kasa</p>
+        </div>
+        <div class="mast-row">
+          <div class="month-line">
+            <button class="month-nav" id="prevMonth" type="button" aria-label="Previous month">‹</button>
+            <h1 id="monthLabel">August 2026</h1>
+            <button class="month-nav" id="nextMonth" type="button" aria-label="Next month">›</button>
+          </div>
+          <p class="rate" id="rateBox">ČNB…</p>
+        </div>
+      </header>
+
+      <section class="balance">
+        <p class="balance-label">This month, in Kč</p>
+        <p class="balance-value" id="net">—</p>
+        <div class="split">
+          <div>
+            <span>In</span>
+            <b id="income">—</b>
+          </div>
+          <div>
+            <span>Out</span>
+            <b id="spend">—</b>
+          </div>
+        </div>
+      </section>
+
+      <section class="feed" id="list"></section>
+    </main>
+
+    <nav class="dock">
+      <button class="dock-spend" id="openSpend" type="button">Spend</button>
+      <button class="dock-settings" id="openSettings" type="button" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.1"/>
+          <path d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+      <button class="dock-income" id="openIncome" type="button">Income</button>
+    </nav>
+
+    <section class="composer" id="composer" hidden>
+      <form id="addForm">
+        <header class="composer-bar">
+          <button class="text-btn" id="cancel" type="button">Close</button>
+          <h2 id="composerTitle">Spend</h2>
+          <span class="bar-spacer"></span>
+        </header>
+
+        <p class="error hidden" id="formError"></p>
+        <input type="hidden" name="direction" id="direction" value="out" />
+        <input type="hidden" name="currency" id="currency" value="CZK" />
+        <input type="hidden" name="category" id="category" />
+
+        <div class="amount-stage">
+          <input class="giant" id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="0" required />
+          <div class="currency-switch" role="group" aria-label="Currency">
+            <button type="button" class="cur on" data-value="CZK">Kč</button>
+            <button type="button" class="cur" data-value="EUR">€</button>
+          </div>
+          <p class="convert" id="eurHint" hidden></p>
+        </div>
+
+        <div class="block">
+          <p class="block-label">Category</p>
+          <div class="cats" id="chips"></div>
+        </div>
+
+        <label class="row-field">
+          <span>When</span>
+          <input id="date" name="date" type="date" required />
+        </label>
+
+        <label class="row-field">
+          <span>Note</span>
+          <input id="note" name="note" placeholder="Optional" maxlength="80" />
+        </label>
+
+        <button class="commit" id="save" type="submit">Save</button>
+        <button class="danger-text hidden" id="deleteTx" type="button">Delete this row</button>
+      </form>
+    </section>
+
+    <section class="panel" id="settings" hidden>
+      <div class="sheet-width">
+        <header class="composer-bar">
+          <button class="text-btn" id="closeSettings" type="button">Close</button>
+          <h2>Settings</h2>
+          <span class="bar-spacer"></span>
+        </header>
+        <div class="panel-body">
+          <p class="block-label">Appearance</p>
+          <div class="theme-switch" role="group" aria-label="Theme">
+            <button type="button" class="theme-btn" data-theme="system">System</button>
+            <button type="button" class="theme-btn" data-theme="light">Light</button>
+            <button type="button" class="theme-btn" data-theme="dark">Dark</button>
+          </div>
+          <p class="hint-line">System follows this phone or computer.</p>
+
+          <p class="block-label">Categories</p>
+          <div id="categoryList"></div>
+          <div class="new-cat-box">
+            <button class="icon-pick is-chooser" id="newIconBtn" type="button" aria-label="Choose icon" title="Choose icon"></button>
+            <input id="newCategory" placeholder="New category" />
+            <button type="button" id="addCategory">Create</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="iconPicker" hidden>
+      <div class="sheet-width">
+        <header class="composer-bar">
+          <button class="text-btn" id="closeIcons" type="button">Back</button>
+          <h2>Icon</h2>
+          <span class="bar-spacer"></span>
+        </header>
+        <div class="icon-grid" id="iconGrid"></div>
+      </div>
+    </section>
+
+    <script src="/icons.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

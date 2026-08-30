@@ -1,0 +1,9 @@
+{
+  "name": "Kasa",
+  "short_name": "Kasa",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3efe6",
+  "theme_color": "#f3efe6",
+  "description": "Personal CZK ledger with live ČNB euro conversion."
+}
