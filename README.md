@@ -26,8 +26,16 @@ On your phone, same Wi-Fi: `http://YOUR-PC-IP:3000`
 - `+` adds a row. Switch Kč / €. Euro rows keep the original € and add Kč using the live ČNB rate.
 - Leave `APP_PASSWORD` empty on your machine. Set it on Railway so the public URL is locked.
 
-## Cheap Railway later
+## Railway
 
-One web service + a volume on `/data`. Enable sleep. Do not add Postgres. Same Dockerfile also works on Fly.io.
+Do **not** put `VOLUME` in the Dockerfile. Railway rejects that. Create the disk in the Railway dashboard instead.
 
-Set `APP_PASSWORD` and `KASA_DATA=/data/kasa.json`.
+1. New project → deploy this GitHub repo (`luky44444/kasa`).
+2. Variables:
+   - `KASA_DATA=/data/kasa.json`
+   - `APP_PASSWORD=` (pick a password; the public URL stays locked)
+   - `HOST=0.0.0.0`
+3. Settings → Volumes → add a volume, mount path `/data`.
+4. Enable sleep if you want it cheap. Do not add Postgres.
+
+Same Dockerfile works on Fly.io.
