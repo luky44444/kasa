@@ -2,11 +2,13 @@ import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
 import {
-  isValidPassword,
+  allowAttempt,
+  authStatus,
+  hasAccount,
   isValidSession,
-  passwordEnabled,
+  loginAccount,
+  registerAccount,
   sessionCookieName,
-  sessionToken,
 } from "./lib/auth.ts";
 import {
   addCategory,
@@ -36,19 +38,41 @@ const TYPES: Record<string, string> = {
   ".ico": "image/x-icon",
 };
 
+const OPEN_PATHS = new Set([
+  "/login",
+  "/login.html",
+  "/register",
+  "/app.css",
+  "/icon.svg",
+  "/manifest.webmanifest",
+]);
+
 function send(res: import("node:http").ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   const payload = typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   const isJson = typeof body !== "string" && !Buffer.isBuffer(body);
   res.writeHead(status, {
     "content-type": isJson ? "application/json; charset=utf-8" : "text/plain; charset=utf-8",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
     ...headers,
   });
   res.end(payload);
 }
 
-function cookieHeader(token: string) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+function isHttps(req: import("node:http").IncomingMessage) {
+  if (process.env.NODE_ENV === "production") return true;
+  const proto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0].trim();
+  return proto === "https";
+}
+
+function cookieHeader(req: import("node:http").IncomingMessage, token: string) {
+  const secure = isHttps(req) ? "; Secure" : "";
   return `${sessionCookieName()}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=34560000${secure}`;
+}
+
+function clearCookieHeader(req: import("node:http").IncomingMessage) {
+  const secure = isHttps(req) ? "; Secure" : "";
+  return `${sessionCookieName()}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
 }
 
 function readCookies(req: import("node:http").IncomingMessage) {
@@ -63,6 +87,11 @@ function readCookies(req: import("node:http").IncomingMessage) {
 
 function authorized(req: import("node:http").IncomingMessage) {
   return isValidSession(readCookies(req)[sessionCookieName()]);
+}
+
+function clientIp(req: import("node:http").IncomingMessage) {
+  const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim();
+  return forwarded || req.socket.remoteAddress || "unknown";
 }
 
 function parseTx(body: Record<string, unknown>) {
@@ -103,8 +132,16 @@ function serveStatic(urlPath: string, res: import("node:http").ServerResponse) {
     return;
   }
   const type = TYPES[extname(filePath)] ?? "application/octet-stream";
-  res.writeHead(200, { "content-type": type, "cache-control": "no-store" });
+  res.writeHead(200, {
+    "content-type": type,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+  });
   res.end(readFileSync(filePath));
+}
+
+function gateLocation() {
+  return hasAccount() ? "/login" : "/register";
 }
 
 const server = createServer(async (req, res) => {
@@ -112,28 +149,48 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const path = url.pathname;
     const method = req.method ?? "GET";
-
-    if (path === "/login" || path === "/login.html") {
-      serveStatic("/login.html", res);
-      return;
-    }
+    const loggedIn = authorized(req);
 
     if (path.startsWith("/api/")) {
-      if (path === "/api/login" && method === "POST") {
-        const body = await readBody(req);
-        if (!isValidPassword(String(body.password ?? ""))) {
-          send(res, 401, { error: "Wrong password" });
+      if (path === "/api/auth" && method === "GET") {
+        send(res, 200, authStatus());
+        return;
+      }
+      if (path === "/api/register" && method === "POST") {
+        if (!allowAttempt(clientIp(req))) {
+          send(res, 429, { error: "Too many attempts. Wait and try again." });
           return;
         }
-        send(res, 200, { ok: true }, { "set-cookie": cookieHeader(sessionToken()) });
+        const body = await readBody(req);
+        const result = await registerAccount(String(body.email ?? ""), String(body.password ?? ""));
+        await flushLedger();
+        if ("error" in result) {
+          send(res, result.status, { error: result.error });
+          return;
+        }
+        send(res, 200, { ok: true }, { "set-cookie": cookieHeader(req, result.token) });
+        return;
+      }
+      if (path === "/api/login" && method === "POST") {
+        if (!allowAttempt(clientIp(req))) {
+          send(res, 429, { error: "Too many attempts. Wait and try again." });
+          return;
+        }
+        const body = await readBody(req);
+        const result = await loginAccount(String(body.email ?? ""), String(body.password ?? ""));
+        if ("error" in result) {
+          send(res, result.status, { error: result.error });
+          return;
+        }
+        send(res, 200, { ok: true }, { "set-cookie": cookieHeader(req, result.token) });
         return;
       }
       if (path === "/api/logout" && method === "POST") {
-        send(res, 200, { ok: true }, { "set-cookie": `${sessionCookieName()}=; Path=/; Max-Age=0` });
+        send(res, 200, { ok: true }, { "set-cookie": clearCookieHeader(req) });
         return;
       }
-      if (!authorized(req)) {
-        send(res, 401, { error: "Unauthorized" });
+      if (!loggedIn) {
+        send(res, 401, { error: "Unauthorized", registered: hasAccount() });
         return;
       }
       if (path === "/api/state" && method === "GET") {
@@ -217,8 +274,32 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (passwordEnabled() && !authorized(req) && path === "/") {
-      res.writeHead(302, { location: "/login" });
+    if (path === "/login" || path === "/login.html" || path === "/register") {
+      if (loggedIn) {
+        res.writeHead(302, { location: "/", "cache-control": "no-store" });
+        res.end();
+        return;
+      }
+      if (path === "/register" && hasAccount()) {
+        res.writeHead(302, { location: "/login", "cache-control": "no-store" });
+        res.end();
+        return;
+      }
+      if ((path === "/login" || path === "/login.html") && !hasAccount()) {
+        res.writeHead(302, { location: "/register", "cache-control": "no-store" });
+        res.end();
+        return;
+      }
+      serveStatic("/login.html", res);
+      return;
+    }
+
+    if (!loggedIn) {
+      if (OPEN_PATHS.has(path)) {
+        serveStatic(path, res);
+        return;
+      }
+      res.writeHead(302, { location: gateLocation(), "cache-control": "no-store" });
       res.end();
       return;
     }
@@ -226,7 +307,7 @@ const server = createServer(async (req, res) => {
     serveStatic(path, res);
   } catch (error) {
     console.error(error);
-    send(res, 500, { error: error instanceof Error ? error.message : "Server error" });
+    send(res, 500, { error: "Server error" });
   }
 });
 

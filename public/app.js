@@ -1,5 +1,5 @@
 const state = {
-  ledger: { categories: [], transactions: [], rate: null, settings: { theme: "system" } },
+  ledger: { categories: [], transactions: [], rate: null, settings: { theme: "system" }, me: null },
   month: currentMonthKey(),
   category: "Other",
   editingId: null,
@@ -32,6 +32,7 @@ const els = {
   deleteTx: document.getElementById("deleteTx"),
   settings: document.getElementById("settings"),
   categoryList: document.getElementById("categoryList"),
+  accountEmail: document.getElementById("accountEmail"),
   iconPicker: document.getElementById("iconPicker"),
   iconGrid: document.getElementById("iconGrid"),
   themeColor: document.getElementById("themeColor"),
@@ -127,11 +128,11 @@ function applyTheme(pref) {
 
 async function api(path, options) {
   const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
   if (response.status === 401) {
-    location.href = "/login";
+    location.href = data.registered === false ? "/register" : "/login";
     throw new Error("Unauthorized");
   }
-  const data = await response.json();
   if (!response.ok) throw new Error(data.error || "Request failed");
   return data;
 }
@@ -267,6 +268,9 @@ function renderNewIconButton() {
 }
 function renderSettings() {
   renderNewIconButton();
+  if (els.accountEmail) {
+    els.accountEmail.textContent = state.ledger.me?.email || "";
+  }
   els.categoryList.innerHTML = state.ledger.categories
     .map(
       (cat) => `<div class="cat-row" data-id="${cat.id}">
@@ -384,6 +388,10 @@ document.getElementById("openIncome").addEventListener("click", () => openCompos
 document.getElementById("cancel").addEventListener("click", closeComposer);
 document.getElementById("openSettings").addEventListener("click", openSettings);
 document.getElementById("closeSettings").addEventListener("click", closeSettings);
+document.getElementById("logout").addEventListener("click", async () => {
+  await fetch("/api/logout", { method: "POST" });
+  location.href = "/login";
+});
 document.getElementById("closeIcons").addEventListener("click", () => {
   els.iconPicker.hidden = true;
 });

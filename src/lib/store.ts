@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import {
+  parseAccount,
   DEFAULT_CATEGORIES,
   normalizeCategories,
   type Ledger,
@@ -18,6 +19,7 @@ function emptyLedger(): Ledger {
     transactions: [],
     rate: null,
     settings: { theme: "system" },
+    account: null,
   };
 }
 
@@ -34,6 +36,7 @@ function readDisk(): Ledger {
       settings: {
         theme: theme === "light" || theme === "dark" || theme === "system" ? theme : "system",
       },
+      account: parseAccount(parsed.account),
     };
   } catch {
     return emptyLedger();
@@ -43,8 +46,11 @@ function readDisk(): Ledger {
 function persist(next: Ledger) {
   mkdirSync(dirname(dataPath), { recursive: true });
   const tempPath = `${dataPath}.tmp`;
-  writeFileSync(tempPath, JSON.stringify(next, null, 2), "utf8");
+  writeFileSync(tempPath, JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
   renameSync(tempPath, dataPath);
+  try {
+    chmodSync(dataPath, 0o600);
+  } catch {}
 }
 
 export function getLedger(): Ledger {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f3efe6" />
-    <title>Kasa login</title>
+    <title>Kasa</title>
     <script>
       (function () {
         try {
@@ -13,35 +13,97 @@
         } catch (e) {}
       })();
     </script>
+    <link rel="icon" href="/icon.svg" />
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
     <main class="login">
-      <form id="loginForm">
+      <form id="gateForm" autocomplete="on">
         <h1>Kasa</h1>
-        <p>This ledger is locked. Enter the password from APP_PASSWORD.</p>
-        <p class="error hidden" id="error">Wrong password.</p>
+        <p id="blurb">Loading…</p>
+        <p class="error hidden" id="error"></p>
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="username" required />
+        </div>
         <div class="field">
           <label for="password">Password</label>
-          <input id="password" name="password" type="password" autofocus required />
+          <input id="password" name="password" type="password" autocomplete="current-password" required minlength="10" maxlength="128" />
         </div>
-        <button type="submit">Open</button>
+        <div class="field hidden" id="confirmWrap">
+          <label for="confirm">Confirm password</label>
+          <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="10" maxlength="128" />
+        </div>
+        <p class="login-hint" id="hint"></p>
+        <button type="submit" id="submitBtn">Continue</button>
       </form>
     </main>
     <script>
-      document.getElementById("loginForm").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const password = document.getElementById("password").value;
-        const response = await fetch("/api/login", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ password }),
-        });
-        if (!response.ok) {
-          document.getElementById("error").classList.remove("hidden");
+      const errorEl = document.getElementById("error");
+      const blurb = document.getElementById("blurb");
+      const hint = document.getElementById("hint");
+      const submitBtn = document.getElementById("submitBtn");
+      const password = document.getElementById("password");
+      const confirmWrap = document.getElementById("confirmWrap");
+      const confirm = document.getElementById("confirm");
+      let mode = "login";
+
+      function showError(message) {
+        errorEl.textContent = message;
+        errorEl.classList.remove("hidden");
+      }
+
+      function setMode(registered) {
+        mode = registered ? "login" : "register";
+        if (mode === "login") {
+          blurb.textContent = "Log in to open your ledger.";
+          hint.textContent = "";
+          submitBtn.textContent = "Log in";
+          password.autocomplete = "current-password";
+          confirmWrap.classList.add("hidden");
+          confirm.required = false;
           return;
         }
-        location.href = "/";
+        blurb.textContent = "Create your account first. Only one user can register; after that this page is login only.";
+        hint.textContent = "Use at least 10 characters. The password is hashed on the server, never stored in plain text.";
+        submitBtn.textContent = "Create account";
+        password.autocomplete = "new-password";
+        confirmWrap.classList.remove("hidden");
+        confirm.required = true;
+      }
+
+      fetch("/api/auth")
+        .then((response) => response.json())
+        .then((data) => setMode(Boolean(data.registered)))
+        .catch(() => setMode(location.pathname !== "/register"));
+
+      document.getElementById("gateForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        errorEl.classList.add("hidden");
+        const email = document.getElementById("email").value;
+        const value = password.value;
+        if (mode === "register" && value !== confirm.value) {
+          showError("Passwords do not match.");
+          return;
+        }
+        submitBtn.disabled = true;
+        try {
+          const response = await fetch(mode === "register" ? "/api/register" : "/api/login", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ email, password: value }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            showError(data.error || "Could not continue.");
+            return;
+          }
+          location.href = "/";
+        } catch {
+          showError("Could not continue.");
+        } finally {
+          submitBtn.disabled = false;
+        }
       });
     </script>
   </body>

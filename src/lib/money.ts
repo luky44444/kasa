@@ -31,11 +31,50 @@ export type RateQuote = {
   tlsRelaxed?: boolean;
 };
 
+export type Account = {
+  email: string;
+  passwordHash: string;
+  salt: string;
+  sessionSecret: string;
+  createdAt: string;
+};
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const HEX32 = /^[0-9a-f]{32}$/i;
+const HEX64 = /^[0-9a-f]{64}$/i;
+
+export function parseAccount(raw: unknown): Account | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  const email = String(row.email ?? "").trim().toLowerCase();
+  const passwordHash = String(row.passwordHash ?? "");
+  const salt = String(row.salt ?? "");
+  const sessionSecret = String(row.sessionSecret ?? "");
+  if (!email || !EMAIL_RE.test(email)) return null;
+  if (!HEX64.test(passwordHash) || !HEX32.test(salt) || !HEX64.test(sessionSecret)) return null;
+  return {
+    email,
+    passwordHash: passwordHash.toLowerCase(),
+    salt: salt.toLowerCase(),
+    sessionSecret: sessionSecret.toLowerCase(),
+    createdAt: String(row.createdAt ?? ""),
+  };
+}
+
 export type Ledger = {
   categories: Category[];
   transactions: Transaction[];
   rate: RateQuote | null;
   settings: Settings;
+  account: Account | null;
+};
+
+export type PublicLedger = {
+  categories: Category[];
+  transactions: Transaction[];
+  rate: RateQuote | null;
+  settings: Settings;
+  me: { email: string } | null;
 };
 
 export const ICON_IDS = [

@@ -4,7 +4,7 @@ import { getLedger, saveLedger, sortTransactions } from "./store.ts";
 import {
   guessIcon,
   slugId,
-  type Ledger,
+  type PublicLedger,
   type RateQuote,
   type ThemePref,
   type Transaction,
@@ -25,7 +25,7 @@ export async function ensureRate(force = false): Promise<RateQuote> {
   }
 }
 
-export async function loadState(): Promise<Ledger> {
+export async function loadState(): Promise<PublicLedger> {
   let rate: RateQuote | null = null;
   try {
     rate = await ensureRate();
@@ -35,9 +35,11 @@ export async function loadState(): Promise<Ledger> {
   }
   const ledger = getLedger();
   return {
-    ...ledger,
-    rate,
+    categories: ledger.categories,
     transactions: sortTransactions(ledger.transactions),
+    rate,
+    settings: ledger.settings,
+    me: ledger.account ? { email: ledger.account.email } : null,
   };
 }
 
