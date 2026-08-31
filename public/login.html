@@ -18,21 +18,17 @@
   </head>
   <body>
     <main class="login">
-      <form id="gateForm" autocomplete="on">
+      <form id="gateForm" autocomplete="off">
         <h1>Kasa</h1>
         <p id="blurb">Loading…</p>
         <p class="error hidden" id="error"></p>
         <div class="field">
-          <label for="email">Email</label>
-          <input id="email" name="email" type="email" autocomplete="username" required />
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input id="password" name="password" type="password" autocomplete="current-password" required minlength="10" maxlength="128" />
+          <label for="pin">PIN</label>
+          <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" autocomplete="off" required />
         </div>
         <div class="field hidden" id="confirmWrap">
-          <label for="confirm">Confirm password</label>
-          <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="10" maxlength="128" />
+          <label for="confirm">PIN again</label>
+          <input id="confirm" name="confirm" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" autocomplete="off" />
         </div>
         <p class="login-hint" id="hint"></p>
         <button type="submit" id="submitBtn">Continue</button>
@@ -43,7 +39,7 @@
       const blurb = document.getElementById("blurb");
       const hint = document.getElementById("hint");
       const submitBtn = document.getElementById("submitBtn");
-      const password = document.getElementById("password");
+      const pin = document.getElementById("pin");
       const confirmWrap = document.getElementById("confirmWrap");
       const confirm = document.getElementById("confirm");
       let mode = "login";
@@ -56,18 +52,18 @@
       function setMode(registered) {
         mode = registered ? "login" : "register";
         if (mode === "login") {
-          blurb.textContent = "Log in to open your ledger.";
+          blurb.textContent = "Enter your PIN. Needed every time you open Kasa, and after 5 minutes idle.";
           hint.textContent = "";
-          submitBtn.textContent = "Log in";
-          password.autocomplete = "current-password";
+          submitBtn.textContent = "Unlock";
+          pin.maxLength = 128;
           confirmWrap.classList.add("hidden");
           confirm.required = false;
           return;
         }
-        blurb.textContent = "Create your account first. Only one user can register; after that this page is login only.";
-        hint.textContent = "Use at least 10 characters. The password is hashed on the server, never stored in plain text.";
-        submitBtn.textContent = "Create account";
-        password.autocomplete = "new-password";
+        blurb.textContent = "Choose a PIN first. Only one PIN can be set. Nobody else can register after you.";
+        hint.textContent = "4–6 digits. Hashed on the server, never stored in plain text.";
+        submitBtn.textContent = "Create PIN";
+        pin.maxLength = 6;
         confirmWrap.classList.remove("hidden");
         confirm.required = true;
       }
@@ -80,10 +76,9 @@
       document.getElementById("gateForm").addEventListener("submit", async (event) => {
         event.preventDefault();
         errorEl.classList.add("hidden");
-        const email = document.getElementById("email").value;
-        const value = password.value;
-        if (mode === "register" && value !== confirm.value) {
-          showError("Passwords do not match.");
+        const value = pin.value.trim();
+        if (mode === "register" && value !== confirm.value.trim()) {
+          showError("PINs do not match.");
           return;
         }
         submitBtn.disabled = true;
@@ -91,7 +86,7 @@
           const response = await fetch(mode === "register" ? "/api/register" : "/api/login", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ email, password: value }),
+            body: JSON.stringify({ pin: value }),
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) {

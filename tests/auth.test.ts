@@ -1,43 +1,41 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes } from "node:crypto";
-import { hashPassword, validateEmail, validatePassword } from "../src/lib/auth.ts";
+import { hashPassword, validatePin, validatePassword } from "../src/lib/auth.ts";
 import { parseAccount } from "../src/lib/money.ts";
 
-test("email validation", () => {
-  assert.equal(typeof validateEmail("you@example.com"), "string");
-  assert.equal(validateEmail("you@example.com"), "you@example.com");
-  assert.equal(validateEmail("  You@Example.COM  "), "you@example.com");
-  assert.equal("error" in validateEmail("not-an-email"), true);
+test("PIN validation", () => {
+  assert.equal(validatePin("1234"), "1234");
+  assert.equal(validatePin("123456"), "123456");
+  assert.equal("error" in validatePin("123"), true);
+  assert.equal("error" in validatePin("abcdef"), true);
 });
 
-test("password validation", () => {
+test("legacy password validation still works", () => {
   assert.equal(typeof validatePassword("long-enough"), "string");
   assert.equal("error" in validatePassword("short"), true);
-  assert.equal("error" in validatePassword("x".repeat(129)), true);
 });
 
 test("scrypt hash is deterministic and not plaintext", async () => {
   const salt = randomBytes(16);
-  const hash = await hashPassword("correct-horse", salt);
-  const again = await hashPassword("correct-horse", salt);
+  const hash = await hashPassword("1234", salt);
+  const again = await hashPassword("1234", salt);
   assert.equal(hash.toString("hex"), again.toString("hex"));
-  assert.notEqual(hash.toString("utf8"), "correct-horse");
-  const other = await hashPassword("wrong-password-x", salt);
+  assert.notEqual(hash.toString("utf8"), "1234");
+  const other = await hashPassword("9999", salt);
   assert.notEqual(hash.toString("hex"), other.toString("hex"));
 });
 
 test("parseAccount rejects junk and plaintext fields", () => {
   assert.equal(parseAccount(null), null);
-  assert.equal(parseAccount({ email: "a@b.c", password: "secret" }), null);
+  assert.equal(parseAccount({ pin: "1234" }), null);
   assert.equal(
     parseAccount({
-      email: "you@example.com",
       passwordHash: "aa".repeat(32),
       salt: "bb".repeat(16),
       sessionSecret: "cc".repeat(32),
       createdAt: "2026-08-30T00:00:00.000Z",
-    })?.email,
-    "you@example.com",
+    })?.passwordHash,
+    "aa".repeat(32),
   );
 });

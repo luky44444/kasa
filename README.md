@@ -2,7 +2,7 @@
 
 Personal browser ledger. You always count in **Kč**. Amounts typed in **€** are converted with the current Czech National Bank EUR fixing (one rate per Czech working day; weekends keep Friday’s number).
 
-No npm packages. Data lives in `.data/kasa.json` (gitignored). Passwords are hashed with scrypt and never sent back to the browser.
+No npm packages. Data lives in `.data/kasa.json` (gitignored). The PIN is hashed with scrypt and never sent back to the browser.
 
 ## Run locally
 
@@ -20,7 +20,7 @@ node --experimental-strip-types src/server.ts
 
 Open http://127.0.0.1:3000
 
-The first visit is **Create account**. After that, only that email can log in. Nobody else can register.
+The first visit is **Create PIN** (4–6 digits). After that, you enter that PIN **every time** you open Kasa. It also locks after **5 minutes idle**.
 
 On your phone, same Wi-Fi: `http://YOUR-PC-IP:3000`
 
@@ -37,11 +37,11 @@ Do **not** put `VOLUME` in the Dockerfile. Railway rejects that. Create the disk
    - `HOST=0.0.0.0`
    - `NODE_ENV=production` (the Dockerfile already sets this)
 3. Settings → Volumes → add a volume, mount path `/data`.
-4. Generate a public domain, open it, **register once**, then log in.
+4. Generate a public domain, open it, **set a PIN once**, then unlock with it.
 5. Enable sleep if you want it cheap. Do not add Postgres.
 
-The volume holds both the ledger and the password hash. Without it, a redeploy wipes the account and you would register again against empty data.
+The volume holds both the ledger and the PIN hash. Without it, a redeploy wipes the PIN and you would set one again against empty data.
 
 Same Dockerfile works on Fly.io.
 
-`APP_PASSWORD` is no longer used. Auth is the in-app account.
+`APP_PASSWORD` is no longer used. Auth is the in-app PIN.

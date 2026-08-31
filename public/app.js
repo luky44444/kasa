@@ -126,6 +126,36 @@ function applyTheme(pref) {
   });
 }
 
+const IDLE_MS = 5 * 60 * 1000;
+let idleTimer = 0;
+let lastActive = Date.now();
+
+function stopIdleWatch() {
+  clearTimeout(idleTimer);
+  idleTimer = 0;
+}
+
+function startIdleWatch() {
+  lastActive = Date.now();
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (Date.now() - lastActive >= IDLE_MS - 50) lockNow();
+  }, IDLE_MS);
+}
+
+function noteActivity() {
+  lastActive = Date.now();
+  startIdleWatch();
+}
+
+async function lockNow() {
+  stopIdleWatch();
+  try {
+    await fetch("/api/logout", { method: "POST" });
+  } catch {}
+  location.href = "/login";
+}
+
 async function api(path, options) {
   const response = await fetch(path, options);
   const data = await response.json().catch(() => ({}));
@@ -143,6 +173,7 @@ function apply(ledger) {
     state.category = ledger.categories[0]?.name || "Other";
   }
   applyTheme(ledger.settings?.theme || "system");
+  startIdleWatch();
   render();
   renderComposer();
   renderSettings();
@@ -268,9 +299,6 @@ function renderNewIconButton() {
 }
 function renderSettings() {
   renderNewIconButton();
-  if (els.accountEmail) {
-    els.accountEmail.textContent = state.ledger.me?.email || "";
-  }
   els.categoryList.innerHTML = state.ledger.categories
     .map(
       (cat) => `<div class="cat-row" data-id="${cat.id}">
@@ -389,6 +417,7 @@ document.getElementById("cancel").addEventListener("click", closeComposer);
 document.getElementById("openSettings").addEventListener("click", openSettings);
 document.getElementById("closeSettings").addEventListener("click", closeSettings);
 document.getElementById("logout").addEventListener("click", async () => {
+  stopIdleWatch();
   await fetch("/api/logout", { method: "POST" });
   location.href = "/login";
 });
@@ -485,6 +514,15 @@ document.addEventListener("keydown", (event) => {
 
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if ((state.ledger.settings?.theme || "system") === "system") applyTheme("system");
+});
+
+["pointerdown", "keydown", "touchstart", "scroll"].forEach((eventName) => {
+  window.addEventListener(eventName, noteActivity, { capture: true, passive: true });
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") return;
+  if (Date.now() - lastActive >= IDLE_MS) lockNow();
+  else noteActivity();
 });
 
 api("/api/state")

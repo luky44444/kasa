@@ -4,11 +4,13 @@ import { extname, join, normalize } from "node:path";
 import {
   allowAttempt,
   authStatus,
+  clearSession,
   hasAccount,
   isValidSession,
   loginAccount,
   registerAccount,
   sessionCookieName,
+  touchSession,
 } from "./lib/auth.ts";
 import {
   addCategory,
@@ -67,7 +69,7 @@ function isHttps(req: import("node:http").IncomingMessage) {
 
 function cookieHeader(req: import("node:http").IncomingMessage, token: string) {
   const secure = isHttps(req) ? "; Secure" : "";
-  return `${sessionCookieName()}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=34560000${secure}`;
+  return `${sessionCookieName()}=${token}; HttpOnly; SameSite=Lax; Path=/${secure}`;
 }
 
 function clearCookieHeader(req: import("node:http").IncomingMessage) {
@@ -162,7 +164,7 @@ const server = createServer(async (req, res) => {
           return;
         }
         const body = await readBody(req);
-        const result = await registerAccount(String(body.email ?? ""), String(body.password ?? ""));
+        const result = await registerAccount(String(body.pin ?? body.password ?? ""));
         await flushLedger();
         if ("error" in result) {
           send(res, result.status, { error: result.error });
@@ -177,7 +179,7 @@ const server = createServer(async (req, res) => {
           return;
         }
         const body = await readBody(req);
-        const result = await loginAccount(String(body.email ?? ""), String(body.password ?? ""));
+        const result = await loginAccount(String(body.pin ?? body.password ?? ""));
         if ("error" in result) {
           send(res, result.status, { error: result.error });
           return;
@@ -186,6 +188,8 @@ const server = createServer(async (req, res) => {
         return;
       }
       if (path === "/api/logout" && method === "POST") {
+        clearSession();
+        await flushLedger();
         send(res, 200, { ok: true }, { "set-cookie": clearCookieHeader(req) });
         return;
       }
@@ -193,6 +197,7 @@ const server = createServer(async (req, res) => {
         send(res, 401, { error: "Unauthorized", registered: hasAccount() });
         return;
       }
+      touchSession();
       if (path === "/api/state" && method === "GET") {
         send(res, 200, await loadState());
         return;

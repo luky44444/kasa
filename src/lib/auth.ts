@@ -7,7 +7,7 @@ const scryptAsync = promisify(scrypt);
 const COOKIE = "kasa_session";
 const KEYLEN = 32;
 const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const SESSION_IDLE_MS = 5 * 60 * 1000;
 
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
@@ -23,16 +23,10 @@ export function authStatus() {
   return { registered: hasAccount() };
 }
 
-export function normalizeEmail(raw: string) {
-  return raw.trim().toLowerCase();
-}
-
-export function validateEmail(raw: string) {
-  const email = normalizeEmail(raw);
-  if (email.length < 5 || email.length > 254 || !EMAIL_RE.test(email)) {
-    return { error: "Enter a valid email" };
-  }
-  return email;
+export function validatePin(raw: string) {
+  const pin = String(raw ?? "").trim();
+  if (!/^\d{4,6}$/.test(pin)) return { error: "PIN must be 4–6 digits" };
+  return pin;
 }
 
 export function validatePassword(raw: string) {
@@ -53,22 +47,38 @@ export function sessionToken(account: Account) {
     .digest("hex");
 }
 
+function withinIdleWindow(account: Account) {
+  const last = Date.parse(account.lastSeen || "");
+  return Number.isFinite(last) && Date.now() - last <= SESSION_IDLE_MS;
+}
+
 export function isValidSession(token: string | undefined) {
   const account = getLedger().account;
-  if (!account || !token) return false;
+  if (!account || !token || !withinIdleWindow(account)) return false;
   const expected = sessionToken(account);
   if (token.length !== expected.length) return false;
   return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
 }
 
-function timingSafeEqualStr(left: string, right: string) {
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  if (a.length !== b.length) {
-    timingSafeEqual(a, Buffer.alloc(a.length));
-    return false;
-  }
-  return timingSafeEqual(a, b);
+export function touchSession() {
+  saveLedger((ledger) => {
+    if (!ledger.account) return ledger;
+    return { ...ledger, account: { ...ledger.account, lastSeen: new Date().toISOString() } };
+  });
+}
+
+export function clearSession() {
+  saveLedger((ledger) => {
+    if (!ledger.account) return ledger;
+    return {
+      ...ledger,
+      account: {
+        ...ledger.account,
+        sessionSecret: randomBytes(32).toString("hex"),
+        lastSeen: "",
+      },
+    };
+  });
 }
 
 export function allowAttempt(ip: string, limit = 20, windowMs = 15 * 60 * 1000) {
@@ -83,42 +93,56 @@ export function allowAttempt(ip: string, limit = 20, windowMs = 15 * 60 * 1000) 
   return bucket.count <= limit;
 }
 
-export async function registerAccount(emailRaw: string, passwordRaw: string) {
+async function hashesMatch(secret: string, account: Account) {
+  const derived = await hashPassword(secret.slice(0, 128), Buffer.from(account.salt, "hex"));
+  const expected = Buffer.from(account.passwordHash, "hex");
+  return derived.length === expected.length && timingSafeEqual(derived, expected);
+}
+
+export async function registerAccount(pinRaw: string) {
   if (hasAccount()) {
-    return { error: "An account already exists. Log in instead.", status: 409 as const };
+    return { error: "A PIN already exists. Unlock instead.", status: 409 as const };
   }
-  const email = validateEmail(emailRaw);
-  if (typeof email !== "string") return { ...email, status: 400 as const };
-  const password = validatePassword(passwordRaw);
-  if (typeof password !== "string") return { ...password, status: 400 as const };
+  const pin = validatePin(pinRaw);
+  if (typeof pin !== "string") return { ...pin, status: 400 as const };
 
   const salt = randomBytes(16);
-  const passwordHash = await hashPassword(password, salt);
+  const passwordHash = await hashPassword(pin, salt);
+  const now = new Date().toISOString();
   const account: Account = {
-    email,
+    email: "",
     passwordHash: passwordHash.toString("hex"),
     salt: salt.toString("hex"),
     sessionSecret: randomBytes(32).toString("hex"),
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    lastSeen: now,
   };
   saveLedger((ledger) => ({ ...ledger, account }));
   return { token: sessionToken(account) };
 }
 
-export async function loginAccount(emailRaw: string, passwordRaw: string) {
-  const password = typeof passwordRaw === "string" ? passwordRaw.slice(0, 128) : "";
+export async function loginAccount(pinRaw: string) {
+  const secret = typeof pinRaw === "string" ? pinRaw.slice(0, 128) : "";
   const account = getLedger().account;
   if (!account) {
-    await hashPassword(password || "x", Buffer.alloc(16));
-    return { error: "Create an account first", status: 401 as const };
+    await hashPassword(secret || "0000", Buffer.alloc(16));
+    return { error: "Create a PIN first", status: 401 as const };
   }
 
-  const derived = await hashPassword(password, Buffer.from(account.salt, "hex"));
-  const expected = Buffer.from(account.passwordHash, "hex");
-  const hashOk = derived.length === expected.length && timingSafeEqual(derived, expected);
-  const emailOk = timingSafeEqualStr(normalizeEmail(emailRaw), account.email);
-  if (!hashOk || !emailOk) {
-    return { error: "Wrong email or password", status: 401 as const };
+  const pin = validatePin(secret);
+  const asPin = typeof pin === "string" ? pin : "";
+  const legacy = validatePassword(secret);
+  const asPassword = typeof legacy === "string" ? legacy : "";
+  const ok = (asPin && (await hashesMatch(asPin, account))) || (asPassword && (await hashesMatch(asPassword, account)));
+  if (!ok) {
+    if (!asPin && !asPassword) return { error: "PIN must be 4–6 digits", status: 400 as const };
+    return { error: "Wrong PIN", status: 401 as const };
   }
-  return { token: sessionToken(account) };
+  const next: Account = {
+    ...account,
+    sessionSecret: randomBytes(32).toString("hex"),
+    lastSeen: new Date().toISOString(),
+  };
+  saveLedger((ledger) => ({ ...ledger, account: next }));
+  return { token: sessionToken(next) };
 }
