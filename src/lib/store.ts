@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import {
   parseAccount,
@@ -23,24 +23,50 @@ function emptyLedger(): Ledger {
   };
 }
 
+function ledgerFromParsed(parsed: Partial<Ledger> & { categories?: unknown }): Ledger {
+  const theme = parsed.settings?.theme;
+  return {
+    categories: normalizeCategories(parsed.categories),
+    transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
+    rate: parsed.rate ?? null,
+    settings: {
+      theme: theme === "light" || theme === "dark" || theme === "system" ? theme : "system",
+    },
+    account: parseAccount(parsed.account),
+  };
+}
+
 function readDisk(): Ledger {
   try {
-    const parsed = JSON.parse(readFileSync(dataPath, "utf8")) as Partial<Ledger> & {
-      categories?: unknown;
-    };
-    const theme = parsed.settings?.theme;
-    return {
-      categories: normalizeCategories(parsed.categories),
-      transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
-      rate: parsed.rate ?? null,
-      settings: {
-        theme: theme === "light" || theme === "dark" || theme === "system" ? theme : "system",
-      },
-      account: parseAccount(parsed.account),
-    };
+    return ledgerFromParsed(JSON.parse(readFileSync(dataPath, "utf8")) as Partial<Ledger> & { categories?: unknown });
   } catch {
     return emptyLedger();
   }
+}
+
+function readDiskIfPresent(): Ledger | null {
+  if (!existsSync(dataPath)) return null;
+  try {
+    return ledgerFromParsed(JSON.parse(readFileSync(dataPath, "utf8")) as Partial<Ledger> & { categories?: unknown });
+  } catch {
+    return null;
+  }
+}
+
+export function mergeLedgers(disk: Ledger, next: Ledger): Ledger {
+  const tx = new Map<string, Transaction>();
+  for (const item of disk.transactions) tx.set(item.id, item);
+  for (const item of next.transactions) tx.set(item.id, item);
+  const categories = new Map<string, Ledger["categories"][number]>();
+  for (const item of disk.categories) categories.set(item.id, item);
+  for (const item of next.categories) categories.set(item.id, item);
+  return {
+    categories: categories.size ? [...categories.values()] : next.categories,
+    transactions: [...tx.values()],
+    rate: next.rate ?? disk.rate,
+    settings: next.settings ?? disk.settings,
+    account: next.account ?? disk.account,
+  };
 }
 
 function persist(next: Ledger) {
@@ -55,16 +81,34 @@ function persist(next: Ledger) {
 
 export function getLedger(): Ledger {
   if (!cache) cache = readDisk();
+  if (cache.transactions.length === 0) {
+    const disk = readDiskIfPresent();
+    if (disk && disk.transactions.length > 0) {
+      cache = mergeLedgers(disk, cache);
+    }
+  }
+  return cache;
+}
+
+export function reloadLedger(): Ledger {
+  cache = readDisk();
   return cache;
 }
 
 export function saveLedger(mutator: (current: Ledger) => Ledger): Ledger {
   const next = mutator(structuredClone(getLedger()));
-  cache = next;
-  writeChain = writeChain.then(() => persist(next)).catch((error) => {
+  const disk = readDiskIfPresent();
+  const merged = disk ? mergeLedgers(disk, next) : next;
+  if (disk && disk.transactions.length > 0 && next.transactions.length === 0) {
+    try {
+      copyFileSync(dataPath, `${dataPath}.bak`);
+    } catch {}
+  }
+  cache = merged;
+  writeChain = writeChain.then(() => persist(merged)).catch((error) => {
     console.error("kasa persist failed", error);
   });
-  return next;
+  return merged;
 }
 
 export async function flushLedger() {

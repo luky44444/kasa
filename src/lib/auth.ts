@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { Account } from "./money.ts";
-import { getLedger, saveLedger } from "./store.ts";
+import { getLedger, reloadLedger, saveLedger } from "./store.ts";
 
 const scryptAsync = promisify(scrypt);
 const COOKIE = "kasa_session";
@@ -100,6 +100,7 @@ async function hashesMatch(secret: string, account: Account) {
 }
 
 export async function registerAccount(pinRaw: string) {
+  reloadLedger();
   if (hasAccount()) {
     return { error: "A PIN already exists. Unlock instead.", status: 409 as const };
   }
@@ -122,6 +123,7 @@ export async function registerAccount(pinRaw: string) {
 }
 
 export async function loginAccount(pinRaw: string) {
+  reloadLedger();
   const secret = typeof pinRaw === "string" ? pinRaw.slice(0, 128) : "";
   const account = getLedger().account;
   if (!account) {
