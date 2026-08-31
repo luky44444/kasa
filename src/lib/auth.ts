@@ -83,7 +83,7 @@ export function hasAccount() {
 
 export function isValidSession(token: string | undefined) {
   const account = getLedger().account;
-  if (!account || !hasEmail(account) || !token) return false;
+  if (!account || !token) return false;
   return tokenEquals(token, sessionToken(account));
 }
 
@@ -94,7 +94,8 @@ function pinStillFresh(account: Account) {
 
 export function isUnlocked(session: string | undefined, unlock: string | undefined) {
   const account = getLedger().account;
-  if (!isValidSession(session) || !account || !hasPin(account)) return false;
+  if (!isValidSession(session) || !account) return false;
+  if (!hasPin(account)) return true;
   return tokenEquals(unlock, unlockToken(account)) && pinStillFresh(account);
 }
 
@@ -103,8 +104,7 @@ export function authStatus(session?: string, unlock?: string) {
   const loggedIn = isValidSession(session);
   const pinReady = hasPin(account);
   return {
-    registered: hasEmail(account),
-    needsUpgrade: Boolean(account && !hasEmail(account)),
+    registered: Boolean(account),
     hasPin: pinReady,
     loggedIn,
     unlocked: isUnlocked(session, unlock),
@@ -113,10 +113,9 @@ export function authStatus(session?: string, unlock?: string) {
 
 export function gateLocation(session?: string, unlock?: string) {
   const status = authStatus(session, unlock);
-  if (status.needsUpgrade) return "/register";
   if (!status.registered) return "/register";
   if (!status.loggedIn) return "/login";
-  if (!status.hasPin || !status.unlocked) return "/pin";
+  if (status.hasPin && !status.unlocked) return "/pin";
   return "/";
 }
 
@@ -186,8 +185,7 @@ function timingSafeEqualStr(left: string, right: string) {
 
 export async function registerAccount(emailRaw: string, passwordRaw: string) {
   reloadLedger();
-  const current = getLedger().account;
-  if (hasEmail(current)) {
+  if (getLedger().account) {
     return { error: "An account already exists. Log in instead.", status: 409 as const };
   }
   const email = validateEmail(emailRaw);
@@ -198,40 +196,49 @@ export async function registerAccount(emailRaw: string, passwordRaw: string) {
   const salt = randomBytes(16);
   const passwordHash = await hashPassword(password, salt);
   const now = new Date().toISOString();
-  const pinHash = current?.passwordHash;
-  const pinSalt = current?.salt;
-  const movedPin = Boolean(current && !hasEmail(current) && pinHash && pinSalt);
   const account: Account = {
     email,
     passwordHash: passwordHash.toString("hex"),
     salt: salt.toString("hex"),
     sessionSecret: randomBytes(32).toString("hex"),
-    createdAt: current?.createdAt || now,
-    pinHash: movedPin ? pinHash : current?.pinHash || "",
-    pinSalt: movedPin ? pinSalt : current?.pinSalt || "",
+    createdAt: now,
+    pinHash: "",
+    pinSalt: "",
     pinUnlockSecret: randomBytes(32).toString("hex"),
     pinLastSeen: "",
   };
   saveLedger((ledger) => ({ ...ledger, account }));
-  return { token: sessionToken(account), hasPin: hasPin(account), unlocked: false };
+  return { token: sessionToken(account), hasPin: false };
 }
 
 export async function loginAccount(emailRaw: string, passwordRaw: string) {
   reloadLedger();
   const password = typeof passwordRaw === "string" ? passwordRaw.slice(0, 128) : "";
   const account = getLedger().account;
-  if (!account || !hasEmail(account)) {
+  if (!account) {
     await hashPassword(password || "x", Buffer.alloc(16));
-    return { error: "Create an account first", status: 401 as const };
-  }
-  const derived = await hashPassword(password, Buffer.from(account.salt, "hex"));
-  const expected = Buffer.from(account.passwordHash, "hex");
-  const hashOk = derived.length === expected.length && timingSafeEqual(derived, expected);
-  const emailOk = timingSafeEqualStr(normalizeEmail(emailRaw), account.email);
-  if (!hashOk || !emailOk) {
     return { error: "Wrong email or password", status: 401 as const };
   }
-  return { token: sessionToken(account), hasPin: hasPin(account), unlocked: false };
+
+  const email = validateEmail(emailRaw);
+  if (typeof email !== "string") {
+    await hashPassword(password || "x", Buffer.alloc(16));
+    return { error: "Wrong email or password", status: 401 as const };
+  }
+
+  const passwordOk = await hashesMatch(password, account.passwordHash, account.salt);
+  const storedEmail = hasEmail(account);
+  const emailOk = storedEmail ? timingSafeEqualStr(email, account.email) : true;
+  if (!passwordOk || !emailOk) {
+    return { error: "Wrong email or password", status: 401 as const };
+  }
+
+  let next = account;
+  if (!storedEmail) {
+    next = { ...account, email };
+    saveLedger((ledger) => ({ ...ledger, account: next }));
+  }
+  return { token: sessionToken(next), hasPin: hasPin(next) };
 }
 
 export async function setPin(pinRaw: string) {

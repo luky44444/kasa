@@ -186,7 +186,7 @@ const server = createServer(async (req, res) => {
         return;
       }
       if (path === "/api/register" && method === "POST") {
-        if (!allowAttempt(clientIp(req))) {
+        if (!allowAttempt(clientIp(req), 10)) {
           send(res, 429, { error: "Too many attempts. Wait and try again." });
           return;
         }
@@ -194,19 +194,20 @@ const server = createServer(async (req, res) => {
         const result = await registerAccount(String(body.email ?? ""), String(body.password ?? ""));
         await flushLedger();
         if ("error" in result) {
-          send(res, result.status, { error: result.error });
+          send(res, result.status, { error: result.error, registered: Boolean(result.status === 409) });
           return;
         }
         send(res, 200, { ok: true, hasPin: result.hasPin }, { "set-cookie": sessionCookie(req, result.token) });
         return;
       }
       if (path === "/api/login" && method === "POST") {
-        if (!allowAttempt(clientIp(req))) {
+        if (!allowAttempt(clientIp(req), 10)) {
           send(res, 429, { error: "Too many attempts. Wait and try again." });
           return;
         }
         const body = await readBody(req);
         const result = await loginAccount(String(body.email ?? ""), String(body.password ?? ""));
+        await flushLedger();
         if ("error" in result) {
           send(res, result.status, { error: result.error });
           return;
@@ -255,7 +256,7 @@ const server = createServer(async (req, res) => {
           send(res, 401, { error: "Unauthorized", ...status });
           return;
         }
-        if (!allowAttempt(clientIp(req))) {
+        if (!allowAttempt(clientIp(req), 8)) {
           send(res, 429, { error: "Too many attempts. Wait and try again." });
           return;
         }

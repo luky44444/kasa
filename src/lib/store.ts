@@ -8,7 +8,9 @@ import {
   type Transaction,
 } from "./money.ts";
 
-const dataPath = resolve(process.env.KASA_DATA ?? ".data/kasa.json");
+function dataFile() {
+  return resolve(process.env.KASA_DATA ?? ".data/kasa.json");
+}
 
 let cache: Ledger | null = null;
 let writeChain: Promise<void> = Promise.resolve();
@@ -38,16 +40,27 @@ function ledgerFromParsed(parsed: Partial<Ledger> & { categories?: unknown }): L
 
 function readDisk(): Ledger {
   try {
-    return ledgerFromParsed(JSON.parse(readFileSync(dataPath, "utf8")) as Partial<Ledger> & { categories?: unknown });
+    return ledgerFromParsed(JSON.parse(readFileSync(dataFile(), "utf8")) as Partial<Ledger> & { categories?: unknown });
   } catch {
     return emptyLedger();
   }
 }
 
 function readDiskIfPresent(): Ledger | null {
-  if (!existsSync(dataPath)) return null;
+  const path = dataFile();
+  if (!existsSync(path)) return null;
   try {
-    return ledgerFromParsed(JSON.parse(readFileSync(dataPath, "utf8")) as Partial<Ledger> & { categories?: unknown });
+    return ledgerFromParsed(JSON.parse(readFileSync(path, "utf8")) as Partial<Ledger> & { categories?: unknown });
+  } catch {
+    return null;
+  }
+}
+
+function readBackup(): Ledger | null {
+  const path = `${dataFile()}.bak`;
+  if (!existsSync(path)) return null;
+  try {
+    return ledgerFromParsed(JSON.parse(readFileSync(path, "utf8")) as Partial<Ledger> & { categories?: unknown });
   } catch {
     return null;
   }
@@ -70,12 +83,13 @@ export function mergeLedgers(disk: Ledger, next: Ledger): Ledger {
 }
 
 function persist(next: Ledger) {
-  mkdirSync(dirname(dataPath), { recursive: true });
-  const tempPath = `${dataPath}.tmp`;
+  const path = dataFile();
+  mkdirSync(dirname(path), { recursive: true });
+  const tempPath = `${path}.tmp`;
   writeFileSync(tempPath, JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
-  renameSync(tempPath, dataPath);
+  renameSync(tempPath, path);
   try {
-    chmodSync(dataPath, 0o600);
+    chmodSync(path, 0o600);
   } catch {}
 }
 
@@ -87,12 +101,22 @@ export function getLedger(): Ledger {
       cache = mergeLedgers(disk, cache);
     }
   }
+  if (cache.transactions.length === 0) {
+    const bak = readBackup();
+    if (bak && bak.transactions.length > 0) {
+      cache = mergeLedgers(bak, cache);
+      const snapshot = cache;
+      writeChain = writeChain.then(() => persist(snapshot)).catch((error) => {
+        console.error("kasa persist failed", error);
+      });
+    }
+  }
   return cache;
 }
 
 export function reloadLedger(): Ledger {
-  cache = readDisk();
-  return cache;
+  cache = null;
+  return getLedger();
 }
 
 export function saveLedger(mutator: (current: Ledger) => Ledger): Ledger {
@@ -101,7 +125,8 @@ export function saveLedger(mutator: (current: Ledger) => Ledger): Ledger {
   const merged = disk ? mergeLedgers(disk, next) : next;
   if (disk && disk.transactions.length > 0 && next.transactions.length === 0) {
     try {
-      copyFileSync(dataPath, `${dataPath}.bak`);
+      const path = dataFile();
+      copyFileSync(path, `${path}.bak`);
     } catch {}
   }
   cache = merged;

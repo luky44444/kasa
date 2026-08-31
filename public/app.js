@@ -33,6 +33,9 @@ const els = {
   settings: document.getElementById("settings"),
   categoryList: document.getElementById("categoryList"),
   accountEmail: document.getElementById("accountEmail"),
+  pinSetup: document.getElementById("pinSetup"),
+  pinError: document.getElementById("pinError"),
+  lockNow: document.getElementById("lockNow"),
   iconPicker: document.getElementById("iconPicker"),
   iconGrid: document.getElementById("iconGrid"),
   themeColor: document.getElementById("themeColor"),
@@ -136,6 +139,10 @@ function stopIdleWatch() {
 }
 
 function startIdleWatch() {
+  if (!state.ledger.me?.hasPin) {
+    stopIdleWatch();
+    return;
+  }
   lastActive = Date.now();
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
@@ -149,6 +156,7 @@ function noteActivity() {
 }
 
 async function lockNow() {
+  if (!state.ledger.me?.hasPin) return;
   stopIdleWatch();
   try {
     await fetch("/api/lock", { method: "POST" });
@@ -304,12 +312,18 @@ function renderNewIconButton() {
 
 function renderSettings() {
   renderNewIconButton();
+  const hasPin = Boolean(state.ledger.me?.hasPin);
   if (els.accountEmail) {
     const email = state.ledger.me?.email || "";
-    els.accountEmail.textContent = email
+    els.accountEmail.textContent = hasPin
       ? `${email} · PIN locks after 5 minutes idle`
-      : "PIN locks after 5 minutes idle";
+      : email
+        ? `${email} · signed in`
+        : "Signed in";
   }
+  if (els.pinSetup) els.pinSetup.hidden = hasPin;
+  if (els.lockNow) els.lockNow.hidden = !hasPin;
+  if (els.pinError) els.pinError.classList.add("hidden");
   els.categoryList.innerHTML = state.ledger.categories
     .map(
       (cat) => `<div class="cat-row" data-id="${cat.id}">
@@ -428,6 +442,32 @@ document.getElementById("cancel").addEventListener("click", closeComposer);
 document.getElementById("openSettings").addEventListener("click", openSettings);
 document.getElementById("closeSettings").addEventListener("click", closeSettings);
 document.getElementById("lockNow").addEventListener("click", lockNow);
+document.getElementById("savePin").addEventListener("click", async () => {
+  const pin = document.getElementById("newPin").value;
+  const again = document.getElementById("newPinConfirm").value;
+  const err = els.pinError;
+  err.classList.add("hidden");
+  if (pin !== again) {
+    err.textContent = "PINs do not match.";
+    err.classList.remove("hidden");
+    return;
+  }
+  try {
+    const response = await fetch("/api/pin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Could not create PIN");
+    document.getElementById("newPin").value = "";
+    document.getElementById("newPinConfirm").value = "";
+    apply(await api("/api/state"));
+  } catch (error) {
+    err.textContent = error.message;
+    err.classList.remove("hidden");
+  }
+});
 document.getElementById("logout").addEventListener("click", async () => {
   stopIdleWatch();
   await fetch("/api/logout", { method: "POST" });
@@ -533,6 +573,7 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") return;
+  if (!state.ledger.me?.hasPin) return;
   if (Date.now() - lastActive >= IDLE_MS) lockNow();
   else noteActivity();
 });

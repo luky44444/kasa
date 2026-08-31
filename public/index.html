@@ -126,7 +126,14 @@
 
           <p class="block-label">Account</p>
           <p class="account-email" id="accountEmail"></p>
-          <button type="button" class="logout-btn" id="lockNow">Lock with PIN</button>
+          <div class="pin-setup" id="pinSetup" hidden>
+            <p class="hint-line">Optional PIN. If you create one, it is asked when you open Kasa and after 5 minutes idle.</p>
+            <input id="newPin" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" placeholder="PIN, 4–6 digits" autocomplete="off" />
+            <input id="newPinConfirm" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" placeholder="PIN again" autocomplete="off" />
+            <p class="error hidden" id="pinError"></p>
+            <button type="button" class="logout-btn" id="savePin">Create PIN</button>
+          </div>
+          <button type="button" class="logout-btn" id="lockNow" hidden>Lock with PIN</button>
           <button type="button" class="logout-btn" id="logout">Log out</button>
 
           <p class="block-label">Categories</p>

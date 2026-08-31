@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomBytes } from "node:crypto";
-import { hashPassword, validateEmail, validatePassword, validatePin } from "../src/lib/auth.ts";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  gateLocation,
+  hashPassword,
+  isUnlocked,
+  loginAccount,
+  registerAccount,
+  validateEmail,
+  validatePassword,
+  validatePin,
+} from "../src/lib/auth.ts";
 import { parseAccount } from "../src/lib/money.ts";
+import { flushLedger, getLedger, reloadLedger, saveLedger } from "../src/lib/store.ts";
 
 test("email validation", () => {
   assert.equal(validateEmail("you@example.com"), "you@example.com");
@@ -41,4 +54,87 @@ test("parseAccount rejects junk and plaintext fields", () => {
     })?.email,
     "you@example.com",
   );
+});
+
+test("register once, then login opens the ledger without a PIN", async () => {
+  const dir = join(tmpdir(), `kasa-auth-${process.hrtime.bigint()}`);
+  mkdirSync(dir, { recursive: true });
+  process.env.KASA_DATA = join(dir, "kasa.json");
+  reloadLedger();
+  try {
+    assert.equal(gateLocation(), "/register");
+    const created = await registerAccount("you@example.com", "correct-horse");
+    assert.equal("token" in created, true);
+    if (!("token" in created)) throw new Error("expected token");
+    assert.equal(created.hasPin, false);
+    assert.equal(gateLocation(created.token), "/");
+    assert.equal(isUnlocked(created.token, undefined), true);
+
+    const again = await registerAccount("other@example.com", "another-long");
+    assert.equal("status" in again && again.status, 409);
+
+    const login = await loginAccount("you@example.com", "correct-horse");
+    assert.equal("token" in login, true);
+    if (!("token" in login)) throw new Error("expected token");
+    assert.equal(login.hasPin, false);
+    assert.equal(isUnlocked(login.token, undefined), true);
+
+    const wrong = await loginAccount("you@example.com", "nope-nope-nope");
+    assert.equal("status" in wrong && wrong.status, 401);
+    const wrongEmail = await loginAccount("nope@example.com", "correct-horse");
+    assert.equal("status" in wrongEmail && wrongEmail.status, 401);
+  } finally {
+    await flushLedger();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("PIN-only leftover cannot register again; login attaches email", async () => {
+  const dir = join(tmpdir(), `kasa-pin-${process.hrtime.bigint()}`);
+  mkdirSync(dir, { recursive: true });
+  process.env.KASA_DATA = join(dir, "kasa.json");
+  reloadLedger();
+  try {
+    const salt = randomBytes(16);
+    const passwordHash = await hashPassword("1234", salt);
+    saveLedger((ledger) => ({
+      ...ledger,
+      transactions: [
+        {
+          id: "keep-me",
+          date: "2026-08-03",
+          direction: "out",
+          currency: "CZK",
+          minor: 1000,
+          category: "Food",
+          note: "Albert",
+          createdAt: "2026-08-03T00:00:00.000Z",
+        },
+      ],
+      account: {
+        email: "",
+        passwordHash: passwordHash.toString("hex"),
+        salt: salt.toString("hex"),
+        sessionSecret: randomBytes(32).toString("hex"),
+        createdAt: "2026-08-31T00:00:00.000Z",
+        pinHash: "",
+        pinSalt: "",
+        pinUnlockSecret: randomBytes(32).toString("hex"),
+        pinLastSeen: "",
+      },
+    }));
+    await flushLedger();
+    reloadLedger();
+
+    const blocked = await registerAccount("you@example.com", "correct-horse");
+    assert.equal("status" in blocked && blocked.status, 409);
+
+    const login = await loginAccount("you@example.com", "1234");
+    assert.equal("token" in login, true);
+    assert.equal(getLedger().account?.email, "you@example.com");
+    assert.equal(getLedger().transactions.some((row) => row.id === "keep-me"), true);
+  } finally {
+    await flushLedger();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

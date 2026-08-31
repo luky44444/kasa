@@ -28,7 +28,7 @@
         </div>
         <div class="field" id="passwordWrap">
           <label for="password">Password</label>
-          <input id="password" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="128" />
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" />
         </div>
         <div class="field hidden" id="confirmWrap">
           <label for="confirm">Confirm password</label>
@@ -37,10 +37,6 @@
         <div class="field hidden" id="pinWrap">
           <label for="pin">PIN</label>
           <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" autocomplete="off" />
-        </div>
-        <div class="field hidden" id="pinConfirmWrap">
-          <label for="pinConfirm">PIN again</label>
-          <input id="pinConfirm" name="pinConfirm" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" autocomplete="off" />
         </div>
         <p class="login-hint" id="hint"></p>
         <button type="submit" id="submitBtn">Continue</button>
@@ -55,12 +51,10 @@
       const passwordWrap = document.getElementById("passwordWrap");
       const confirmWrap = document.getElementById("confirmWrap");
       const pinWrap = document.getElementById("pinWrap");
-      const pinConfirmWrap = document.getElementById("pinConfirmWrap");
       const email = document.getElementById("email");
       const password = document.getElementById("password");
       const confirm = document.getElementById("confirm");
       const pin = document.getElementById("pin");
-      const pinConfirm = document.getElementById("pinConfirm");
       let mode = "login";
 
       function show(el, on) {
@@ -73,45 +67,38 @@
       }
 
       function setMode(data) {
-        if (data.unlocked) {
+        if (data.loggedIn && (!data.hasPin || data.unlocked)) {
           location.href = "/";
           return;
         }
-        if (data.needsUpgrade || !data.registered) mode = "register";
+        if (!data.registered) mode = "register";
         else if (!data.loggedIn) mode = "login";
-        else if (!data.hasPin) mode = "setpin";
         else mode = "unlock";
 
-        show(emailWrap, mode === "register" || mode === "login");
-        show(passwordWrap, mode === "register" || mode === "login");
+        show(emailWrap, mode !== "unlock");
+        show(passwordWrap, mode !== "unlock");
         show(confirmWrap, mode === "register");
-        show(pinWrap, mode === "setpin" || mode === "unlock");
-        show(pinConfirmWrap, mode === "setpin");
-        email.required = mode === "register" || mode === "login";
-        password.required = mode === "register" || mode === "login";
+        show(pinWrap, mode === "unlock");
+        email.required = mode !== "unlock";
+        password.required = mode !== "unlock";
         confirm.required = mode === "register";
-        pin.required = mode === "setpin" || mode === "unlock";
-        pinConfirm.required = mode === "setpin";
+        pin.required = mode === "unlock";
 
         if (mode === "register") {
-          blurb.textContent = data.needsUpgrade
-            ? "Your PIN is saved. Create the email login so the app can remember you."
-            : "Create your account first. After that, you will set a PIN as a second lock.";
-          hint.textContent = "Password at least 10 characters. Hashed on the server.";
+          blurb.textContent = "Create your account. This is a one-time setup.";
+          hint.textContent = "Password at least 10 characters. Hashed on the server. After this you will only see Log in.";
           submitBtn.textContent = "Create account";
           password.autocomplete = "new-password";
+          password.minLength = 10;
         } else if (mode === "login") {
           blurb.textContent = "Log in. This stays signed in on this browser.";
-          hint.textContent = "";
+          hint.textContent = "Wrong password is rate-limited. There is no second register.";
           submitBtn.textContent = "Log in";
           password.autocomplete = "current-password";
-        } else if (mode === "setpin") {
-          blurb.textContent = "Now create a PIN. Login stays remembered; the PIN locks the ledger.";
-          hint.textContent = "4–6 digits. Asked every time you open Kasa, and after 5 minutes idle.";
-          submitBtn.textContent = "Create PIN";
+          password.removeAttribute("minlength");
         } else {
           blurb.textContent = "Enter your PIN to open the ledger.";
-          hint.textContent = "You are still logged in. The PIN is the second lock.";
+          hint.textContent = "You are still logged in. The PIN is an extra lock.";
           submitBtn.textContent = "Unlock";
         }
       }
@@ -128,19 +115,11 @@
           showError("Passwords do not match.");
           return;
         }
-        if (mode === "setpin" && pin.value !== pinConfirm.value) {
-          showError("PINs do not match.");
-          return;
-        }
         submitBtn.disabled = true;
         try {
           let path = "/api/login";
           let body = { email: email.value, password: password.value };
           if (mode === "register") path = "/api/register";
-          if (mode === "setpin") {
-            path = "/api/pin";
-            body = { pin: pin.value };
-          }
           if (mode === "unlock") {
             path = "/api/unlock";
             body = { pin: pin.value };
@@ -151,11 +130,17 @@
             body: JSON.stringify(body),
           });
           const data = await response.json().catch(() => ({}));
+          if (response.status === 409) {
+            showError(data.error || "An account already exists. Log in instead.");
+            setMode({ registered: true, loggedIn: false, hasPin: false, unlocked: false });
+            return;
+          }
           if (!response.ok) {
             showError(data.error || "Could not continue.");
             return;
           }
-          location.href = mode === "setpin" || mode === "unlock" ? "/" : "/pin";
+          if (mode === "unlock") location.href = "/";
+          else location.href = data.hasPin ? "/pin" : "/";
         } catch {
           showError("Could not continue.");
         } finally {
