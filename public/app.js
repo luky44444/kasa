@@ -151,16 +151,20 @@ function noteActivity() {
 async function lockNow() {
   stopIdleWatch();
   try {
-    await fetch("/api/logout", { method: "POST" });
+    await fetch("/api/lock", { method: "POST" });
   } catch {}
-  location.href = "/login";
+  location.href = "/pin";
 }
 
 async function api(path, options) {
   const response = await fetch(path, options);
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) {
-    location.href = data.registered === false ? "/register" : "/login";
+    if (data.loggedIn === false || data.registered === false) {
+      location.href = data.registered === false ? "/register" : "/login";
+    } else {
+      location.href = "/pin";
+    }
     throw new Error("Unauthorized");
   }
   if (!response.ok) throw new Error(data.error || "Request failed");
@@ -297,8 +301,15 @@ function renderNewIconButton() {
   els.newIconBtn.classList.toggle("is-chooser", !picked);
   els.newIconBtn.innerHTML = kasaIcon(picked ? state.newIcon : "chooser");
 }
+
 function renderSettings() {
   renderNewIconButton();
+  if (els.accountEmail) {
+    const email = state.ledger.me?.email || "";
+    els.accountEmail.textContent = email
+      ? `${email} · PIN locks after 5 minutes idle`
+      : "PIN locks after 5 minutes idle";
+  }
   els.categoryList.innerHTML = state.ledger.categories
     .map(
       (cat) => `<div class="cat-row" data-id="${cat.id}">
@@ -416,6 +427,7 @@ document.getElementById("openIncome").addEventListener("click", () => openCompos
 document.getElementById("cancel").addEventListener("click", closeComposer);
 document.getElementById("openSettings").addEventListener("click", openSettings);
 document.getElementById("closeSettings").addEventListener("click", closeSettings);
+document.getElementById("lockNow").addEventListener("click", lockNow);
 document.getElementById("logout").addEventListener("click", async () => {
   stopIdleWatch();
   await fetch("/api/logout", { method: "POST" });

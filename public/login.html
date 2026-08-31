@@ -18,17 +18,29 @@
   </head>
   <body>
     <main class="login">
-      <form id="gateForm" autocomplete="off">
+      <form id="gateForm" autocomplete="on">
         <h1>Kasa</h1>
         <p id="blurb">Loading…</p>
         <p class="error hidden" id="error"></p>
-        <div class="field">
-          <label for="pin">PIN</label>
-          <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" autocomplete="off" required />
+        <div class="field" id="emailWrap">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="username" />
+        </div>
+        <div class="field" id="passwordWrap">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="128" />
         </div>
         <div class="field hidden" id="confirmWrap">
-          <label for="confirm">PIN again</label>
-          <input id="confirm" name="confirm" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" autocomplete="off" />
+          <label for="confirm">Confirm password</label>
+          <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="10" maxlength="128" />
+        </div>
+        <div class="field hidden" id="pinWrap">
+          <label for="pin">PIN</label>
+          <input id="pin" name="pin" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" autocomplete="off" />
+        </div>
+        <div class="field hidden" id="pinConfirmWrap">
+          <label for="pinConfirm">PIN again</label>
+          <input id="pinConfirm" name="pinConfirm" type="password" inputmode="numeric" pattern="\d{4,6}" maxlength="6" autocomplete="off" />
         </div>
         <p class="login-hint" id="hint"></p>
         <button type="submit" id="submitBtn">Continue</button>
@@ -39,61 +51,111 @@
       const blurb = document.getElementById("blurb");
       const hint = document.getElementById("hint");
       const submitBtn = document.getElementById("submitBtn");
-      const pin = document.getElementById("pin");
+      const emailWrap = document.getElementById("emailWrap");
+      const passwordWrap = document.getElementById("passwordWrap");
       const confirmWrap = document.getElementById("confirmWrap");
+      const pinWrap = document.getElementById("pinWrap");
+      const pinConfirmWrap = document.getElementById("pinConfirmWrap");
+      const email = document.getElementById("email");
+      const password = document.getElementById("password");
       const confirm = document.getElementById("confirm");
+      const pin = document.getElementById("pin");
+      const pinConfirm = document.getElementById("pinConfirm");
       let mode = "login";
+
+      function show(el, on) {
+        el.classList.toggle("hidden", !on);
+      }
 
       function showError(message) {
         errorEl.textContent = message;
         errorEl.classList.remove("hidden");
       }
 
-      function setMode(registered) {
-        mode = registered ? "login" : "register";
-        if (mode === "login") {
-          blurb.textContent = "Enter your PIN. Needed every time you open Kasa, and after 5 minutes idle.";
-          hint.textContent = "";
-          submitBtn.textContent = "Unlock";
-          pin.maxLength = 128;
-          confirmWrap.classList.add("hidden");
-          confirm.required = false;
+      function setMode(data) {
+        if (data.unlocked) {
+          location.href = "/";
           return;
         }
-        blurb.textContent = "Choose a PIN first. Only one PIN can be set. Nobody else can register after you.";
-        hint.textContent = "4–6 digits. Hashed on the server, never stored in plain text.";
-        submitBtn.textContent = "Create PIN";
-        pin.maxLength = 6;
-        confirmWrap.classList.remove("hidden");
-        confirm.required = true;
+        if (data.needsUpgrade || !data.registered) mode = "register";
+        else if (!data.loggedIn) mode = "login";
+        else if (!data.hasPin) mode = "setpin";
+        else mode = "unlock";
+
+        show(emailWrap, mode === "register" || mode === "login");
+        show(passwordWrap, mode === "register" || mode === "login");
+        show(confirmWrap, mode === "register");
+        show(pinWrap, mode === "setpin" || mode === "unlock");
+        show(pinConfirmWrap, mode === "setpin");
+        email.required = mode === "register" || mode === "login";
+        password.required = mode === "register" || mode === "login";
+        confirm.required = mode === "register";
+        pin.required = mode === "setpin" || mode === "unlock";
+        pinConfirm.required = mode === "setpin";
+
+        if (mode === "register") {
+          blurb.textContent = data.needsUpgrade
+            ? "Your PIN is saved. Create the email login so the app can remember you."
+            : "Create your account first. After that, you will set a PIN as a second lock.";
+          hint.textContent = "Password at least 10 characters. Hashed on the server.";
+          submitBtn.textContent = "Create account";
+          password.autocomplete = "new-password";
+        } else if (mode === "login") {
+          blurb.textContent = "Log in. This stays signed in on this browser.";
+          hint.textContent = "";
+          submitBtn.textContent = "Log in";
+          password.autocomplete = "current-password";
+        } else if (mode === "setpin") {
+          blurb.textContent = "Now create a PIN. Login stays remembered; the PIN locks the ledger.";
+          hint.textContent = "4–6 digits. Asked every time you open Kasa, and after 5 minutes idle.";
+          submitBtn.textContent = "Create PIN";
+        } else {
+          blurb.textContent = "Enter your PIN to open the ledger.";
+          hint.textContent = "You are still logged in. The PIN is the second lock.";
+          submitBtn.textContent = "Unlock";
+        }
       }
 
       fetch("/api/auth")
         .then((response) => response.json())
-        .then((data) => setMode(Boolean(data.registered)))
-        .catch(() => setMode(location.pathname !== "/register"));
+        .then(setMode)
+        .catch(() => setMode({ registered: location.pathname !== "/register", loggedIn: false, hasPin: false, unlocked: false }));
 
       document.getElementById("gateForm").addEventListener("submit", async (event) => {
         event.preventDefault();
         errorEl.classList.add("hidden");
-        const value = pin.value.trim();
-        if (mode === "register" && value !== confirm.value.trim()) {
+        if (mode === "register" && password.value !== confirm.value) {
+          showError("Passwords do not match.");
+          return;
+        }
+        if (mode === "setpin" && pin.value !== pinConfirm.value) {
           showError("PINs do not match.");
           return;
         }
         submitBtn.disabled = true;
         try {
-          const response = await fetch(mode === "register" ? "/api/register" : "/api/login", {
+          let path = "/api/login";
+          let body = { email: email.value, password: password.value };
+          if (mode === "register") path = "/api/register";
+          if (mode === "setpin") {
+            path = "/api/pin";
+            body = { pin: pin.value };
+          }
+          if (mode === "unlock") {
+            path = "/api/unlock";
+            body = { pin: pin.value };
+          }
+          const response = await fetch(path, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ pin: value }),
+            body: JSON.stringify(body),
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) {
             showError(data.error || "Could not continue.");
             return;
           }
-          location.href = "/";
+          location.href = mode === "setpin" || mode === "unlock" ? "/" : "/pin";
         } catch {
           showError("Could not continue.");
         } finally {

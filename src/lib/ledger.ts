@@ -39,7 +39,9 @@ export async function loadState(): Promise<PublicLedger> {
     transactions: sortTransactions(ledger.transactions),
     rate,
     settings: ledger.settings,
-    me: ledger.account ? { locked: false } : null,
+    me: ledger.account
+      ? { email: ledger.account.email, hasPin: Boolean(ledger.account.pinHash) }
+      : null,
   };
 }
 

@@ -5,12 +5,17 @@ import {
   allowAttempt,
   authStatus,
   clearSession,
-  hasAccount,
+  gateLocation,
+  isUnlocked,
   isValidSession,
+  lockPin,
   loginAccount,
   registerAccount,
   sessionCookieName,
-  touchSession,
+  setPin,
+  touchPin,
+  unlockCookieName,
+  unlockPin,
 } from "./lib/auth.ts";
 import {
   addCategory,
@@ -44,12 +49,13 @@ const OPEN_PATHS = new Set([
   "/login",
   "/login.html",
   "/register",
+  "/pin",
   "/app.css",
   "/icon.svg",
   "/manifest.webmanifest",
 ]);
 
-function send(res: import("node:http").ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
+function send(res: import("node:http").ServerResponse, status: number, body: unknown, headers: Record<string, string | string[]> = {}) {
   const payload = typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   const isJson = typeof body !== "string" && !Buffer.isBuffer(body);
   res.writeHead(status, {
@@ -67,14 +73,23 @@ function isHttps(req: import("node:http").IncomingMessage) {
   return proto === "https";
 }
 
-function cookieHeader(req: import("node:http").IncomingMessage, token: string) {
+function cookieFlags(req: import("node:http").IncomingMessage, maxAge?: number) {
   const secure = isHttps(req) ? "; Secure" : "";
-  return `${sessionCookieName()}=${token}; HttpOnly; SameSite=Lax; Path=/${secure}`;
+  const age = maxAge == null ? "" : `; Max-Age=${maxAge}`;
+  return `HttpOnly; SameSite=Lax; Path=/${age}${secure}`;
 }
 
-function clearCookieHeader(req: import("node:http").IncomingMessage) {
-  const secure = isHttps(req) ? "; Secure" : "";
-  return `${sessionCookieName()}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`;
+function sessionCookie(req: import("node:http").IncomingMessage, token: string) {
+  return `${sessionCookieName()}=${token}; ${cookieFlags(req, 34560000)}`;
+}
+
+function unlockCookie(req: import("node:http").IncomingMessage, token: string) {
+  return `${unlockCookieName()}=${token}; ${cookieFlags(req)}`;
+}
+
+function clearCookies(req: import("node:http").IncomingMessage) {
+  const flags = cookieFlags(req, 0);
+  return [`${sessionCookieName()}=; ${flags}`, `${unlockCookieName()}=; ${flags}`];
 }
 
 function readCookies(req: import("node:http").IncomingMessage) {
@@ -87,8 +102,18 @@ function readCookies(req: import("node:http").IncomingMessage) {
   return out;
 }
 
-function authorized(req: import("node:http").IncomingMessage) {
-  return isValidSession(readCookies(req)[sessionCookieName()]);
+function cookiesOf(req: import("node:http").IncomingMessage) {
+  const all = readCookies(req);
+  return { session: all[sessionCookieName()], unlock: all[unlockCookieName()] };
+}
+
+function loggedIn(req: import("node:http").IncomingMessage) {
+  return isValidSession(cookiesOf(req).session);
+}
+
+function unlocked(req: import("node:http").IncomingMessage) {
+  const { session, unlock } = cookiesOf(req);
+  return isUnlocked(session, unlock);
 }
 
 function clientIp(req: import("node:http").IncomingMessage) {
@@ -142,8 +167,9 @@ function serveStatic(urlPath: string, res: import("node:http").ServerResponse) {
   res.end(readFileSync(filePath));
 }
 
-function gateLocation() {
-  return hasAccount() ? "/login" : "/register";
+function redirect(res: import("node:http").ServerResponse, location: string) {
+  res.writeHead(302, { location, "cache-control": "no-store" });
+  res.end();
 }
 
 const server = createServer(async (req, res) => {
@@ -151,11 +177,12 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const path = url.pathname;
     const method = req.method ?? "GET";
-    const loggedIn = authorized(req);
+    const { session, unlock } = cookiesOf(req);
+    const status = authStatus(session, unlock);
 
     if (path.startsWith("/api/")) {
       if (path === "/api/auth" && method === "GET") {
-        send(res, 200, authStatus());
+        send(res, 200, status);
         return;
       }
       if (path === "/api/register" && method === "POST") {
@@ -164,13 +191,13 @@ const server = createServer(async (req, res) => {
           return;
         }
         const body = await readBody(req);
-        const result = await registerAccount(String(body.pin ?? body.password ?? ""));
+        const result = await registerAccount(String(body.email ?? ""), String(body.password ?? ""));
         await flushLedger();
         if ("error" in result) {
           send(res, result.status, { error: result.error });
           return;
         }
-        send(res, 200, { ok: true }, { "set-cookie": cookieHeader(req, result.token) });
+        send(res, 200, { ok: true, hasPin: result.hasPin }, { "set-cookie": sessionCookie(req, result.token) });
         return;
       }
       if (path === "/api/login" && method === "POST") {
@@ -179,25 +206,74 @@ const server = createServer(async (req, res) => {
           return;
         }
         const body = await readBody(req);
-        const result = await loginAccount(String(body.pin ?? body.password ?? ""));
+        const result = await loginAccount(String(body.email ?? ""), String(body.password ?? ""));
         if ("error" in result) {
           send(res, result.status, { error: result.error });
           return;
         }
-        send(res, 200, { ok: true }, { "set-cookie": cookieHeader(req, result.token) });
+        send(res, 200, { ok: true, hasPin: result.hasPin }, { "set-cookie": sessionCookie(req, result.token) });
         return;
       }
       if (path === "/api/logout" && method === "POST") {
         clearSession();
         await flushLedger();
-        send(res, 200, { ok: true }, { "set-cookie": clearCookieHeader(req) });
+        send(res, 200, { ok: true }, { "set-cookie": clearCookies(req) });
         return;
       }
-      if (!loggedIn) {
-        send(res, 401, { error: "Unauthorized", registered: hasAccount() });
+      if (path === "/api/lock" && method === "POST") {
+        if (!loggedIn(req)) {
+          send(res, 401, { error: "Unauthorized", ...status });
+          return;
+        }
+        lockPin();
+        await flushLedger();
+        const flags = cookieFlags(req, 0);
+        send(res, 200, { ok: true }, { "set-cookie": `${unlockCookieName()}=; ${flags}` });
         return;
       }
-      touchSession();
+      if (path === "/api/pin" && method === "POST") {
+        if (!loggedIn(req)) {
+          send(res, 401, { error: "Unauthorized", ...status });
+          return;
+        }
+        if (!allowAttempt(clientIp(req))) {
+          send(res, 429, { error: "Too many attempts. Wait and try again." });
+          return;
+        }
+        const body = await readBody(req);
+        const result = await setPin(String(body.pin ?? ""));
+        await flushLedger();
+        if ("error" in result) {
+          send(res, result.status, { error: result.error });
+          return;
+        }
+        send(res, 200, { ok: true }, { "set-cookie": unlockCookie(req, result.unlock) });
+        return;
+      }
+      if (path === "/api/unlock" && method === "POST") {
+        if (!loggedIn(req)) {
+          send(res, 401, { error: "Unauthorized", ...status });
+          return;
+        }
+        if (!allowAttempt(clientIp(req))) {
+          send(res, 429, { error: "Too many attempts. Wait and try again." });
+          return;
+        }
+        const body = await readBody(req);
+        const result = await unlockPin(String(body.pin ?? ""));
+        await flushLedger();
+        if ("error" in result) {
+          send(res, result.status, { error: result.error });
+          return;
+        }
+        send(res, 200, { ok: true }, { "set-cookie": unlockCookie(req, result.unlock) });
+        return;
+      }
+      if (!loggedIn(req) || !unlocked(req)) {
+        send(res, 401, { error: "Unauthorized", ...authStatus(session, unlock) });
+        return;
+      }
+      touchPin();
       if (path === "/api/state" && method === "GET") {
         send(res, 200, await loadState());
         return;
@@ -279,33 +355,24 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (path === "/login" || path === "/login.html" || path === "/register") {
-      if (loggedIn) {
-        res.writeHead(302, { location: "/", "cache-control": "no-store" });
-        res.end();
-        return;
-      }
-      if (path === "/register" && hasAccount()) {
-        res.writeHead(302, { location: "/login", "cache-control": "no-store" });
-        res.end();
-        return;
-      }
-      if ((path === "/login" || path === "/login.html") && !hasAccount()) {
-        res.writeHead(302, { location: "/register", "cache-control": "no-store" });
-        res.end();
+    if (path === "/login" || path === "/login.html" || path === "/register" || path === "/pin") {
+      const next = gateLocation(session, unlock);
+      const here = path === "/pin" ? "/pin" : path === "/register" ? "/register" : "/login";
+      if (next !== here) {
+        redirect(res, next);
         return;
       }
       serveStatic("/login.html", res);
       return;
     }
 
-    if (!loggedIn) {
-      if (OPEN_PATHS.has(path)) {
-        serveStatic(path, res);
-        return;
-      }
-      res.writeHead(302, { location: gateLocation(), "cache-control": "no-store" });
-      res.end();
+    if (OPEN_PATHS.has(path) && !status.unlocked) {
+      serveStatic(path === "/pin" ? "/login.html" : path, res);
+      return;
+    }
+
+    if (!status.unlocked) {
+      redirect(res, gateLocation(session, unlock));
       return;
     }
 

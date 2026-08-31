@@ -37,7 +37,10 @@ export type Account = {
   salt: string;
   sessionSecret: string;
   createdAt: string;
-  lastSeen: string;
+  pinHash: string;
+  pinSalt: string;
+  pinUnlockSecret: string;
+  pinLastSeen: string;
 };
 
 const HEX32 = /^[0-9a-f]{32}$/i;
@@ -50,13 +53,19 @@ export function parseAccount(raw: unknown): Account | null {
   const salt = String(row.salt ?? "");
   const sessionSecret = String(row.sessionSecret ?? "");
   if (!HEX64.test(passwordHash) || !HEX32.test(salt) || !HEX64.test(sessionSecret)) return null;
+  const pinHash = String(row.pinHash ?? "");
+  const pinSalt = String(row.pinSalt ?? "");
+  const pinUnlockSecretRaw = String(row.pinUnlockSecret ?? "");
   return {
     email: String(row.email ?? "").trim().toLowerCase(),
     passwordHash: passwordHash.toLowerCase(),
     salt: salt.toLowerCase(),
     sessionSecret: sessionSecret.toLowerCase(),
     createdAt: String(row.createdAt ?? ""),
-    lastSeen: String(row.lastSeen ?? ""),
+    pinHash: HEX64.test(pinHash) ? pinHash.toLowerCase() : "",
+    pinSalt: HEX32.test(pinSalt) ? pinSalt.toLowerCase() : "",
+    pinUnlockSecret: HEX64.test(pinUnlockSecretRaw) ? pinUnlockSecretRaw.toLowerCase() : "",
+    pinLastSeen: String(row.pinLastSeen ?? row.lastSeen ?? ""),
   };
 }
 
@@ -73,7 +82,7 @@ export type PublicLedger = {
   transactions: Transaction[];
   rate: RateQuote | null;
   settings: Settings;
-  me: { locked: boolean } | null;
+  me: { email: string; hasPin: boolean } | null;
 };
 
 export const ICON_IDS = [

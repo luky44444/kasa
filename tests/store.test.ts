@@ -31,7 +31,10 @@ test("PIN save must not drop transactions already on disk", () => {
       salt: "bb".repeat(16),
       sessionSecret: "cc".repeat(32),
       createdAt: "2026-08-31T00:00:00.000Z",
-      lastSeen: "2026-08-31T00:00:00.000Z",
+      pinHash: "",
+      pinSalt: "",
+      pinUnlockSecret: "cc".repeat(32),
+      pinLastSeen: "",
     },
   };
   const merged = mergeLedgers(disk, next);
