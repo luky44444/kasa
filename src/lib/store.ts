@@ -230,22 +230,25 @@ export function getLedger(): Ledger {
   return cache;
 }
 
+async function loadRemoteLedger(remote: SupabaseConfig): Promise<Ledger> {
+  const cloud = await readSupabase(remote);
+  const disk = readDiskIfPresent() ?? readBackup();
+  if (ledgerHasData(cloud)) return cloud;
+  if (ledgerHasData(disk)) {
+    await writeSupabase(remote, disk);
+    return disk;
+  }
+  return cloud ?? emptyLedger();
+}
+
 export async function reloadLedger(): Promise<Ledger> {
+  await writeChain;
   cache = null;
   hydrated = false;
   const remote = supabaseConfig();
   if (remote) {
     try {
-      const cloud = await readSupabase(remote);
-      const disk = readDiskIfPresent() ?? readBackup();
-      if (ledgerHasData(cloud)) {
-        cache = cloud;
-      } else if (ledgerHasData(disk)) {
-        cache = disk;
-        await writeSupabase(remote, disk);
-      } else {
-        cache = cloud ?? emptyLedger();
-      }
+      cache = await loadRemoteLedger(remote);
     } catch (error) {
       console.error("kasa supabase hydrate failed", error);
       cache = loadFromDisk();
@@ -258,17 +261,25 @@ export async function reloadLedger(): Promise<Ledger> {
   return cache;
 }
 
+export async function ensureLedger(): Promise<Ledger> {
+  await writeChain;
+  if (hydrated && cache && ledgerHasData(cache)) return cache;
+  return reloadLedger();
+}
+
 export function saveLedger(mutator: (current: Ledger) => Ledger): Ledger {
   const next = mutator(structuredClone(getLedger()));
   let merged = next;
   if (!supabaseConfig()) {
     const disk = readDiskIfPresent();
-    merged = disk ? mergeLedgers(disk, next) : next;
     if (disk && disk.transactions.length > 0 && next.transactions.length === 0) {
       try {
         const path = dataFile();
         copyFileSync(path, `${path}.bak`);
       } catch {}
+      // Only union with disk when this write would wipe every row. Merging on
+      // every save resurrected transactions the user just deleted.
+      merged = mergeLedgers(disk, next);
     }
   }
   cache = merged;

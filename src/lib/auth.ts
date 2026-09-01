@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { Account } from "./money.ts";
-import { getLedger, reloadLedger, saveLedger } from "./store.ts";
+import { ensureLedger, getLedger, saveLedger } from "./store.ts";
 
 const scryptAsync = promisify(scrypt);
 const SESSION_COOKIE = "kasa_session";
@@ -192,7 +192,7 @@ function timingSafeEqualStr(left: string, right: string) {
 }
 
 export async function registerAccount(emailRaw: string, passwordRaw: string) {
-  await reloadLedger();
+  await ensureLedger();
   if (getLedger().account) {
     return { error: "An account already exists. Log in instead.", status: 409 as const };
   }
@@ -220,7 +220,7 @@ export async function registerAccount(emailRaw: string, passwordRaw: string) {
 }
 
 export async function loginAccount(emailRaw: string, passwordRaw: string) {
-  await reloadLedger();
+  await ensureLedger();
   const password = typeof passwordRaw === "string" ? passwordRaw.slice(0, 128) : "";
   const account = getLedger().account;
   if (!account) {

@@ -3,8 +3,47 @@ import test from "node:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { flushLedger, getLedger, mergeLedgers, reloadLedger, saveLedger } from "../src/lib/store.ts";
-import { DEFAULT_CATEGORIES } from "../src/lib/money.ts";
+import { ensureLedger, flushLedger, getLedger, mergeLedgers, reloadLedger, saveLedger } from "../src/lib/store.ts";
+import { DEFAULT_CATEGORIES, type Ledger, type Transaction } from "../src/lib/money.ts";
+
+function tx(id: string, extra: Partial<Transaction> = {}): Transaction {
+  return {
+    id,
+    date: "2026-08-03",
+    direction: "out",
+    currency: "CZK",
+    minor: 200,
+    category: "Food",
+    note: "",
+    createdAt: "2026-08-03T00:00:00.000Z",
+    ...extra,
+  };
+}
+
+function account(email = "you@example.com") {
+  return {
+    email,
+    passwordHash: "aa".repeat(32),
+    salt: "bb".repeat(16),
+    sessionSecret: "cc".repeat(32),
+    createdAt: "2026-08-31T00:00:00.000Z",
+    pinHash: "",
+    pinSalt: "",
+    pinUnlockSecret: "cc".repeat(32),
+    pinLastSeen: "",
+  };
+}
+
+function ledger(partial: Partial<Ledger> = {}): Ledger {
+  return {
+    categories: structuredClone(DEFAULT_CATEGORIES),
+    transactions: [],
+    rate: null,
+    settings: { theme: "system" },
+    account: null,
+    ...partial,
+  };
+}
 
 test("PIN save must not drop transactions already on disk", () => {
   const disk = {
@@ -273,6 +312,101 @@ test("supabase RPC hydrate uses kasa_load", async () => {
     await reloadLedger();
     assert.equal(getLedger().transactions[0]?.id, "from-rpc");
     assert.equal(calls.some((item) => item.includes("rpc/kasa_load")), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.SUPABASE_ANON_KEY;
+    delete process.env.KASA_STORE_SECRET;
+    await flushLedger();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("deleting a transaction is not resurrected from disk", async () => {
+  const dir = join(tmpdir(), `kasa-del-${process.hrtime.bigint()}`);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "kasa.json");
+  process.env.KASA_DATA = path;
+  delete process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.SUPABASE_ANON_KEY;
+  delete process.env.KASA_STORE_SECRET;
+  writeFileSync(
+    path,
+    JSON.stringify(
+      ledger({
+        transactions: [tx("keep-me"), tx("gone", { note: "delete me", minor: 500 })],
+      }),
+    ),
+  );
+  try {
+    await reloadLedger();
+    saveLedger((current) => ({
+      ...current,
+      transactions: current.transactions.filter((row) => row.id !== "gone"),
+    }));
+    await flushLedger();
+    assert.equal(getLedger().transactions.some((row) => row.id === "gone"), false);
+    assert.equal(getLedger().transactions.some((row) => row.id === "keep-me"), true);
+    await reloadLedger();
+    assert.equal(getLedger().transactions.some((row) => row.id === "gone"), false);
+    assert.equal(getLedger().transactions.map((row) => row.id).join(","), "keep-me");
+  } finally {
+    await flushLedger();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("login reload must not drop an unflushed supabase transaction", async () => {
+  const dir = join(tmpdir(), `kasa-sb-race-${process.hrtime.bigint()}`);
+  mkdirSync(dir, { recursive: true });
+  process.env.KASA_DATA = join(dir, "kasa.json");
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-test";
+  delete process.env.KASA_STORE_SECRET;
+  const originalFetch = globalThis.fetch;
+  const cloud = ledger({
+    transactions: [tx("from-cloud")],
+    account: account(),
+  });
+  const writes: Array<{ data?: { transactions?: Array<{ id: string }> } }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (url.includes("/rest/v1/kasa_ledger") && method === "GET") {
+      return new Response(JSON.stringify([{ data: cloud }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.includes("/rest/v1/kasa_ledger") && method === "POST") {
+      writes.push(JSON.parse(String(init?.body ?? "{}")));
+      return new Response("", { status: 201 });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  try {
+    await reloadLedger();
+    assert.equal(getLedger().transactions[0]?.id, "from-cloud");
+
+    saveLedger((current) => ({
+      ...current,
+      transactions: [...current.transactions, tx("new-row", { date: "2026-09-01", minor: 100 })],
+    }));
+    // Login used to call reloadLedger(), which nulled the live cache.
+    await ensureLedger();
+    saveLedger((current) => ({
+      ...current,
+      account: current.account ? { ...current.account, pinLastSeen: "2026-09-01T12:00:00.000Z" } : current.account,
+    }));
+    await flushLedger();
+
+    assert.equal(getLedger().transactions.some((row) => row.id === "from-cloud"), true);
+    assert.equal(getLedger().transactions.some((row) => row.id === "new-row"), true);
+    const last = writes.at(-1);
+    assert.equal(last?.data?.transactions?.some((row) => row.id === "new-row"), true);
+    assert.equal(last?.data?.transactions?.some((row) => row.id === "from-cloud"), true);
   } finally {
     globalThis.fetch = originalFetch;
     delete process.env.SUPABASE_URL;
