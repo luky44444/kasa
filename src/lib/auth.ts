@@ -126,6 +126,14 @@ export function touchPin() {
   });
 }
 
+function withUnlock(account: Account): Account {
+  return {
+    ...account,
+    pinUnlockSecret: randomBytes(32).toString("hex"),
+    pinLastSeen: new Date().toISOString(),
+  };
+}
+
 export function lockPin() {
   saveLedger((ledger) => {
     if (!ledger.account) return ledger;
@@ -234,11 +242,18 @@ export async function loginAccount(emailRaw: string, passwordRaw: string) {
   }
 
   let next = account;
+  let changed = false;
   if (!storedEmail) {
-    next = { ...account, email };
-    saveLedger((ledger) => ({ ...ledger, account: next }));
+    next = { ...next, email };
+    changed = true;
   }
-  return { token: sessionToken(next), hasPin: hasPin(next) };
+  const pinReady = hasPin(next);
+  if (pinReady) {
+    next = withUnlock(next);
+    changed = true;
+  }
+  if (changed) saveLedger((ledger) => ({ ...ledger, account: next }));
+  return { token: sessionToken(next), hasPin: pinReady, unlock: pinReady ? unlockToken(next) : "" };
 }
 
 export async function setPin(pinRaw: string) {
@@ -248,14 +263,11 @@ export async function setPin(pinRaw: string) {
   if (!account) return { error: "Log in first", status: 401 as const };
   const salt = randomBytes(16);
   const pinHash = await hashPassword(pin, salt);
-  const now = new Date().toISOString();
-  const next: Account = {
+  const next: Account = withUnlock({
     ...account,
     pinHash: pinHash.toString("hex"),
     pinSalt: salt.toString("hex"),
-    pinUnlockSecret: randomBytes(32).toString("hex"),
-    pinLastSeen: now,
-  };
+  });
   saveLedger((ledger) => ({ ...ledger, account: next }));
   return { unlock: unlockToken(next) };
 }
@@ -270,11 +282,7 @@ export async function unlockPin(pinRaw: string) {
   }
   const ok = await hashesMatch(pin, account.pinHash, account.pinSalt);
   if (!ok) return { error: "Wrong PIN", status: 401 as const };
-  const next: Account = {
-    ...account,
-    pinUnlockSecret: randomBytes(32).toString("hex"),
-    pinLastSeen: new Date().toISOString(),
-  };
+  const next: Account = withUnlock(account);
   saveLedger((ledger) => ({ ...ledger, account: next }));
   return { unlock: unlockToken(next) };
 }

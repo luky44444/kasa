@@ -8,8 +8,10 @@ import {
   gateLocation,
   hashPassword,
   isUnlocked,
+  lockPin,
   loginAccount,
   registerAccount,
+  setPin,
   validateEmail,
   validatePassword,
   validatePin,
@@ -133,6 +135,35 @@ test("PIN-only leftover cannot register again; login attaches email", async () =
     assert.equal("token" in login, true);
     assert.equal(getLedger().account?.email, "you@example.com");
     assert.equal(getLedger().transactions.some((row) => row.id === "keep-me"), true);
+  } finally {
+    await flushLedger();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("email login unlocks a PIN lock", async () => {
+  const dir = join(tmpdir(), `kasa-unlock-login-${process.hrtime.bigint()}`);
+  mkdirSync(dir, { recursive: true });
+  process.env.KASA_DATA = join(dir, "kasa.json");
+  reloadLedger();
+  try {
+    const created = await registerAccount("you@example.com", "correct-horse");
+    assert.equal("token" in created, true);
+    if (!("token" in created)) throw new Error("expected token");
+    const pin = await setPin("2468");
+    assert.equal("unlock" in pin, true);
+    if (!("unlock" in pin)) throw new Error("expected unlock");
+    lockPin();
+    assert.equal(gateLocation(created.token, pin.unlock), "/pin");
+    assert.equal(isUnlocked(created.token, pin.unlock), false);
+
+    const login = await loginAccount("you@example.com", "correct-horse");
+    assert.equal("token" in login, true);
+    assert.equal("unlock" in login && login.unlock.length > 0, true);
+    if (!("token" in login) || !("unlock" in login)) throw new Error("expected unlock");
+    assert.equal(login.hasPin, true);
+    assert.equal(isUnlocked(login.token, login.unlock), true);
+    assert.equal(gateLocation(login.token, login.unlock), "/");
   } finally {
     await flushLedger();
     rmSync(dir, { recursive: true, force: true });

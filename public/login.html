@@ -40,6 +40,7 @@
         </div>
         <p class="login-hint" id="hint"></p>
         <button type="submit" id="submitBtn">Continue</button>
+        <a class="login-switch hidden" id="switchAuth" href="/login">Use email and password</a>
       </form>
     </main>
     <script>
@@ -55,7 +56,9 @@
       const password = document.getElementById("password");
       const confirm = document.getElementById("confirm");
       const pin = document.getElementById("pin");
+      const switchAuth = document.getElementById("switchAuth");
       let mode = "login";
+      let pinAvailable = false;
 
       function show(el, on) {
         el.classList.toggle("hidden", !on);
@@ -66,13 +69,19 @@
         errorEl.classList.remove("hidden");
       }
 
+      function wantsEmailLogin() {
+        return location.pathname === "/login" || location.pathname === "/login.html";
+      }
+
       function setMode(data) {
         if (data.loggedIn && (!data.hasPin || data.unlocked)) {
           location.href = "/";
           return;
         }
+        pinAvailable = Boolean(data.loggedIn && data.hasPin && !data.unlocked);
         if (!data.registered) mode = "register";
         else if (!data.loggedIn) mode = "login";
+        else if (wantsEmailLogin()) mode = "login";
         else mode = "unlock";
 
         show(emailWrap, mode !== "unlock");
@@ -91,8 +100,12 @@
           password.autocomplete = "new-password";
           password.minLength = 10;
         } else if (mode === "login") {
-          blurb.textContent = "Log in. This stays signed in on this browser.";
-          hint.textContent = "Wrong password is rate-limited. There is no second register.";
+          blurb.textContent = pinAvailable
+            ? "Log in with email and password."
+            : "Log in. This stays signed in on this browser.";
+          hint.textContent = pinAvailable
+            ? "This also opens the ledger if you would rather not use the PIN."
+            : "Wrong password is rate-limited. There is no second register.";
           submitBtn.textContent = "Log in";
           password.autocomplete = "current-password";
           password.removeAttribute("minlength");
@@ -100,6 +113,18 @@
           blurb.textContent = "Enter your PIN to open the ledger.";
           hint.textContent = "You are still logged in. The PIN is an extra lock.";
           submitBtn.textContent = "Unlock";
+        }
+
+        if (mode === "unlock") {
+          switchAuth.href = "/login";
+          switchAuth.textContent = "Use email and password";
+          show(switchAuth, true);
+        } else if (mode === "login" && pinAvailable) {
+          switchAuth.href = "/pin";
+          switchAuth.textContent = "Use PIN instead";
+          show(switchAuth, true);
+        } else {
+          show(switchAuth, false);
         }
       }
 
@@ -139,8 +164,7 @@
             showError(data.error || "Could not continue.");
             return;
           }
-          if (mode === "unlock") location.href = "/";
-          else location.href = data.hasPin ? "/pin" : "/";
+          location.href = "/";
         } catch {
           showError("Could not continue.");
         } finally {

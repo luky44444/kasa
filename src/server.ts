@@ -212,7 +212,9 @@ const server = createServer(async (req, res) => {
           send(res, result.status, { error: result.error });
           return;
         }
-        send(res, 200, { ok: true, hasPin: result.hasPin }, { "set-cookie": sessionCookie(req, result.token) });
+        const cookies = [sessionCookie(req, result.token)];
+        if (result.unlock) cookies.push(unlockCookie(req, result.unlock));
+        send(res, 200, { ok: true, hasPin: result.hasPin }, { "set-cookie": cookies });
         return;
       }
       if (path === "/api/logout" && method === "POST") {
@@ -359,7 +361,8 @@ const server = createServer(async (req, res) => {
     if (path === "/login" || path === "/login.html" || path === "/register" || path === "/pin") {
       const next = gateLocation(session, unlock);
       const here = path === "/pin" ? "/pin" : path === "/register" ? "/register" : "/login";
-      if (next !== here) {
+      const emailInsteadOfPin = here === "/login" && next === "/pin";
+      if (next !== here && !emailInsteadOfPin) {
         redirect(res, next);
         return;
       }

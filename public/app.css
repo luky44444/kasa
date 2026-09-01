@@ -460,6 +460,19 @@ input, button { -webkit-tap-highlight-color: transparent; }
   color: var(--paper);
   font-weight: 650;
 }
+.login-switch {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.login-switch:hover {
+  color: var(--ink);
+}
 
 .account-email {
   margin: 0 0 12px;
