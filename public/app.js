@@ -39,6 +39,20 @@ const els = {
   iconPicker: document.getElementById("iconPicker"),
   iconGrid: document.getElementById("iconGrid"),
   themeColor: document.getElementById("themeColor"),
+  analytics: document.getElementById("analytics"),
+  vsLast: document.getElementById("vsLast"),
+  vsLastHint: document.getElementById("vsLastHint"),
+  saveRate: document.getElementById("saveRate"),
+  saveRateHint: document.getElementById("saveRateHint"),
+  pace: document.getElementById("pace"),
+  paceHint: document.getElementById("paceHint"),
+  biggest: document.getElementById("biggest"),
+  biggestHint: document.getElementById("biggestHint"),
+  cashflowChart: document.getElementById("cashflowChart"),
+  catChart: document.getElementById("catChart"),
+  trendChart: document.getElementById("trendChart"),
+  weekdayChart: document.getElementById("weekdayChart"),
+  facts: document.getElementById("facts"),
 };
 
 function currentMonthKey(now = new Date()) {
@@ -97,6 +111,242 @@ function toCzkHaler(tx, eurRate) {
   const signed = tx.direction === "out" ? -tx.minor : tx.minor;
   if (tx.currency === "CZK") return signed;
   return Math.round(signed * eurRate);
+}
+
+function daysInMonth(key) {
+  const [yearText, monthText] = key.split("-");
+  return new Date(Number(yearText), Number(monthText), 0).getDate();
+}
+
+function monthTotals(key, rate) {
+  const rows = state.ledger.transactions.filter((item) => item.date.slice(0, 7) === key);
+  const income = rows.reduce((sum, item) => sum + Math.max(0, toCzkHaler(item, rate)), 0);
+  const spend = rows.reduce((sum, item) => sum + Math.min(0, toCzkHaler(item, rate)), 0);
+  return { rows, income, spend, net: income + spend };
+}
+
+function pctChange(current, previous) {
+  if (!previous) return null;
+  return (current - previous) / Math.abs(previous);
+}
+
+function formatPct(value) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const rounded = Math.round(value * 1000) / 10;
+  const sign = rounded > 0 ? "+" : "";
+  return `${sign}${rounded}%`;
+}
+
+function shortMonth(key) {
+  const [yearText, monthText] = key.split("-");
+  return new Intl.DateTimeFormat("en-GB", { month: "short" }).format(
+    new Date(Number(yearText), Number(monthText) - 1, 1),
+  );
+}
+
+function setInsight(el, hintEl, value, hint) {
+  if (el) el.textContent = value;
+  if (hintEl) hintEl.textContent = hint || "";
+}
+
+function svgBars(series, { colors, labels, dual }) {
+  const width = 640;
+  const height = 200;
+  const left = 8;
+  const right = 8;
+  const top = 12;
+  const bottom = 28;
+  const innerW = width - left - right;
+  const innerH = height - top - bottom;
+  const max = Math.max(1, ...series.flatMap((row) => (dual ? [row.a, row.b] : [row.a])));
+  const n = Math.max(1, series.length);
+  const slot = innerW / n;
+  const bar = Math.max(2, slot * (dual ? 0.32 : 0.55));
+  const parts = [];
+  series.forEach((row, index) => {
+    const x = left + slot * index + slot / 2;
+    if (dual) {
+      const hIn = (row.a / max) * (innerH * 0.92);
+      const hOut = (row.b / max) * (innerH * 0.92);
+      parts.push(
+        `<rect x="${(x - bar - 2).toFixed(1)}" y="${(top + innerH - hIn).toFixed(1)}" width="${bar.toFixed(1)}" height="${hIn.toFixed(1)}" rx="2" fill="${colors[0]}" />`,
+      );
+      parts.push(
+        `<rect x="${(x + 2).toFixed(1)}" y="${(top + innerH - hOut).toFixed(1)}" width="${bar.toFixed(1)}" height="${hOut.toFixed(1)}" rx="2" fill="${colors[1]}" />`,
+      );
+    } else {
+      const h = (row.a / max) * (innerH * 0.92);
+      parts.push(
+        `<rect x="${(x - bar / 2).toFixed(1)}" y="${(top + innerH - h).toFixed(1)}" width="${bar.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${colors[0]}" />`,
+      );
+    }
+    if (labels && (n <= 12 || index === 0 || index === n - 1 || (index + 1) % 5 === 0)) {
+      parts.push(
+        `<text x="${x.toFixed(1)}" y="${height - 8}" text-anchor="middle" fill="currentColor" font-size="11">${labels[index]}</text>`,
+      );
+    }
+  });
+  return `<svg viewBox="0 0 ${width} ${height}" role="img">${parts.join("")}</svg>`;
+}
+
+function svgHBars(rows) {
+  if (!rows.length) return `<p class="chart-empty">No spend in this month.</p>`;
+  const width = 640;
+  const rowH = 34;
+  const height = Math.max(80, rows.length * rowH + 8);
+  const max = Math.max(1, ...rows.map((row) => row.value));
+  return `<svg viewBox="0 0 ${width} ${height}" role="img">${rows
+    .map((row, index) => {
+      const y = 8 + index * rowH;
+      const w = Math.max(6, Math.min(400, (row.value / max) * 400));
+      return `<text x="0" y="${y + 14}" fill="currentColor" font-size="13">${row.label}</text>
+        <rect x="168" y="${y}" width="${w.toFixed(1)}" height="18" rx="4" fill="var(--spend)" />
+        <text x="${(180 + w).toFixed(1)}" y="${y + 14}" fill="currentColor" font-size="12">${row.share}</text>`;
+    })
+    .join("")}</svg>`;
+}
+
+function renderAnalytics(monthRows, rate) {
+  if (!els.analytics) return;
+  const spendAbs = Math.abs(monthRows.reduce((sum, item) => sum + Math.min(0, toCzkHaler(item, rate)), 0));
+  const income = monthRows.reduce((sum, item) => sum + Math.max(0, toCzkHaler(item, rate)), 0);
+  const prev = monthTotals(shiftMonth(state.month, -1), rate);
+  const prevSpend = Math.abs(prev.spend);
+  const spendDelta = pctChange(spendAbs, prevSpend);
+  setInsight(
+    els.vsLast,
+    els.vsLastHint,
+    formatPct(spendDelta),
+    prevSpend ? `Last month ${formatCzk(prevSpend)}` : "No spend last month",
+  );
+  if (els.vsLast) els.vsLast.classList.toggle("is-up", Boolean(spendDelta && spendDelta > 0));
+  if (els.vsLast) els.vsLast.classList.toggle("is-down", Boolean(spendDelta && spendDelta < 0));
+
+  const kept = income > 0 ? (income - spendAbs) / income : null;
+  setInsight(
+    els.saveRate,
+    els.saveRateHint,
+    kept == null ? "—" : formatPct(kept),
+    income ? `${formatCzk(income - spendAbs)} left after spend` : "No income this month",
+  );
+  if (els.saveRate) {
+    els.saveRate.classList.toggle("is-up", kept != null && kept < 0);
+    els.saveRate.classList.toggle("is-down", kept != null && kept > 0);
+  }
+
+  const today = todayIso();
+  const inViewMonth = today.slice(0, 7) === state.month;
+  const elapsed = inViewMonth ? Number(today.slice(8, 10)) : daysInMonth(state.month);
+  const daily = elapsed ? spendAbs / elapsed : 0;
+  const projected = daily * daysInMonth(state.month);
+  setInsight(
+    els.pace,
+    els.paceHint,
+    spendAbs ? formatCzk(projected) : "—",
+    spendAbs ? `${formatCzk(daily)} per day so far` : "No spend yet",
+  );
+
+  let biggest = null;
+  for (const item of monthRows) {
+    if (item.direction !== "out") continue;
+    const czk = Math.abs(toCzkHaler(item, rate));
+    if (!biggest || czk > biggest.czk) biggest = { item, czk };
+  }
+  setInsight(
+    els.biggest,
+    els.biggestHint,
+    biggest ? formatCzk(biggest.czk) : "—",
+    biggest ? `${biggest.item.note || biggest.item.category} · ${formatDay(biggest.item.date)}` : "No spend yet",
+  );
+
+  const dayCount = daysInMonth(state.month);
+  const byDay = Array.from({ length: dayCount }, (_, i) => ({ a: 0, b: 0 }));
+  for (const item of monthRows) {
+    const day = Number(item.date.slice(8, 10)) - 1;
+    if (day < 0 || day >= dayCount) continue;
+    const czk = toCzkHaler(item, rate);
+    if (czk > 0) byDay[day].a += czk;
+    else byDay[day].b += Math.abs(czk);
+  }
+  const dayLabels = byDay.map((_, i) => (i === 0 || i === dayCount - 1 || (i + 1) % 5 === 0 ? String(i + 1) : ""));
+  if (els.cashflowChart) {
+    els.cashflowChart.innerHTML = monthRows.length
+      ? `${svgBars(byDay, { colors: ["var(--income)", "var(--spend)"], labels: dayLabels, dual: true })}<p class="chart-legend"><span class="dot in"></span>Income <span class="dot out"></span>Spend</p>`
+      : `<p class="chart-empty">Nothing to plot in ${escapeHtml(formatMonthLabel(state.month))}.</p>`;
+  }
+
+  const catMap = new Map();
+  for (const item of monthRows) {
+    if (item.direction !== "out") continue;
+    const czk = Math.abs(toCzkHaler(item, rate));
+    catMap.set(item.category, (catMap.get(item.category) || 0) + czk);
+  }
+  const catRows = [...catMap.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 7)
+    .map(([name, value]) => ({
+      label: escapeHtml(name),
+      value,
+      share: spendAbs ? `${Math.round((value / spendAbs) * 100)}%` : "0%",
+    }));
+  if (els.catChart) els.catChart.innerHTML = svgHBars(catRows);
+
+  const keys = [];
+  for (let i = 5; i >= 0; i -= 1) keys.push(shiftMonth(state.month, -i));
+  const trend = keys.map((key) => {
+    const totals = monthTotals(key, rate);
+    return { a: Math.abs(totals.spend), b: totals.income };
+  });
+  if (els.trendChart) {
+    els.trendChart.innerHTML = `${svgBars(trend, {
+      colors: ["var(--spend)", "var(--income)"],
+      labels: keys.map(shortMonth),
+      dual: true,
+    })}<p class="chart-legend"><span class="dot out"></span>Spend <span class="dot in"></span>Income</p>`;
+  }
+
+  const weekdays = [
+    { key: 1, label: "Mon", a: 0 },
+    { key: 2, label: "Tue", a: 0 },
+    { key: 3, label: "Wed", a: 0 },
+    { key: 4, label: "Thu", a: 0 },
+    { key: 5, label: "Fri", a: 0 },
+    { key: 6, label: "Sat", a: 0 },
+    { key: 0, label: "Sun", a: 0 },
+  ];
+  for (const item of monthRows) {
+    if (item.direction !== "out") continue;
+    const dow = new Date(`${item.date}T12:00:00`).getDay();
+    const row = weekdays.find((entry) => entry.key === dow);
+    if (row) row.a += Math.abs(toCzkHaler(item, rate));
+  }
+  if (els.weekdayChart) {
+    els.weekdayChart.innerHTML = svgBars(weekdays, {
+      colors: ["var(--spend)"],
+      labels: weekdays.map((row) => row.label),
+      dual: false,
+    });
+  }
+
+  const count = monthRows.length;
+  const avgTicket = count && spendAbs ? spendAbs / monthRows.filter((item) => item.direction === "out").length : 0;
+  const eurSpend = monthRows.reduce((sum, item) => {
+    if (item.direction !== "out" || item.currency !== "EUR") return sum;
+    return sum + Math.abs(toCzkHaler(item, rate));
+  }, 0);
+  const allNet = state.ledger.transactions.reduce((sum, item) => sum + toCzkHaler(item, rate), 0);
+  const outCount = monthRows.filter((item) => item.direction === "out").length;
+  const hot = weekdays.slice().sort((a, b) => b.a - a.a)[0];
+  const facts = [
+    `${count} row${count === 1 ? "" : "s"} this month`,
+    outCount ? `Average spend ${formatCzk(avgTicket)}` : "No spend rows yet",
+    spendAbs ? `${Math.round((eurSpend / spendAbs) * 100)}% of spend started in €` : "No euro spend mix yet",
+    hot && hot.a ? `${hot.label} is the heaviest spend day` : "No weekday pattern yet",
+    `All-time net ${formatCzk(allNet)}`,
+  ];
+  if (els.facts) {
+    els.facts.innerHTML = facts.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+  }
 }
 
 function parseAmountToHaler(raw, eurRate, currency) {
@@ -199,15 +449,14 @@ function render() {
     : "ČNB unavailable";
 
   const rows = state.ledger.transactions.filter((item) => item.date.slice(0, 7) === state.month);
-  const income = rows.reduce((sum, item) => sum + Math.max(0, toCzkHaler(item, rate)), 0);
-  const spend = rows.reduce((sum, item) => sum + Math.min(0, toCzkHaler(item, rate)), 0);
-  const net = income + spend;
+  const { income, spend, net } = monthTotals(state.month, rate);
 
   els.monthLabel.textContent = formatMonthLabel(state.month);
   els.net.textContent = formatCzk(net);
   els.net.classList.toggle("is-neg", net < 0);
   els.income.textContent = formatCzk(income);
   els.spend.textContent = formatCzk(Math.abs(spend));
+  renderAnalytics(rows, rate);
 
   if (rows.length === 0) {
     els.list.innerHTML = `<div class="empty"><p>Nothing in ${formatMonthLabel(state.month)} yet.</p><button type="button" id="loadExample">Load August sample</button></div>`;

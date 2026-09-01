@@ -651,3 +651,175 @@ input, button { -webkit-tap-highlight-color: transparent; }
   font-size: 14px;
 }
 .composer.is-in .commit { color: var(--paper); }
+
+.analytics { display: none; }
+.chart-empty, .chart-legend {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.chart-legend { display: flex; align-items: center; gap: 14px; }
+.chart-legend .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 99px;
+  vertical-align: middle;
+}
+.chart-legend .dot.in { background: var(--income); }
+.chart-legend .dot.out { background: var(--spend); }
+.facts {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.facts li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 14px;
+}
+.facts li:last-child { border-bottom: 0; }
+
+@media (min-width: 1024px) {
+  .page {
+    width: min(1280px, calc(100% - 48px));
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    grid-template-areas:
+      "mast mast"
+      "balance feed"
+      "analytics feed";
+    column-gap: 40px;
+    row-gap: 8px;
+    padding: 28px 0 40px;
+    align-items: start;
+  }
+  .mast { grid-area: mast; margin-bottom: 8px; padding-right: 320px; }
+  .mast h1 { font-size: 28px; }
+  .balance {
+    grid-area: balance;
+    margin-top: 8px;
+    padding: 20px 24px 22px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: var(--sheet);
+  }
+  .balance-value { font-size: 44px; }
+  .analytics {
+    grid-area: analytics;
+    display: grid;
+    gap: 16px;
+    margin-top: 12px;
+  }
+  .feed {
+    grid-area: feed;
+    margin-top: 8px;
+    max-height: calc(100dvh - 120px);
+    overflow: auto;
+    padding: 8px 8px 20px 4px;
+    position: sticky;
+    top: 16px;
+  }
+  .insight-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .insight {
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--sheet);
+  }
+  .insight p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .insight b {
+    display: block;
+    margin-top: 6px;
+    font-size: 22px;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  .insight b.is-up { color: var(--spend); }
+  .insight b.is-down { color: var(--income); }
+  .insight span {
+    display: block;
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .chart-card {
+    padding: 16px 18px 14px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: var(--sheet);
+  }
+  .chart-card h2 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .chart-frame svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    color: var(--muted);
+  }
+  .chart-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .dock {
+    top: 26px;
+    right: max(24px, calc((100% - 1280px) / 2));
+    bottom: auto;
+    left: auto;
+    width: auto;
+    transform: none;
+    grid-template-columns: auto 52px auto;
+  }
+  .dock-spend, .dock-income { padding: 0 18px; min-width: 108px; }
+  .page { padding-right: 8px; }
+
+  .composer {
+    display: grid;
+    place-items: center;
+    background: color-mix(in srgb, #000 38%, transparent);
+  }
+  .composer[hidden] { display: none; }
+  .composer form {
+    width: min(480px, calc(100% - 48px));
+    min-height: 0;
+    max-height: 92dvh;
+    overflow: auto;
+    margin: 24px auto;
+    padding: 8px 28px 28px;
+    background: var(--sheet);
+    border-radius: 22px;
+  }
+  .panel {
+    display: grid;
+    place-items: start center;
+    background: color-mix(in srgb, #000 38%, transparent);
+    padding: 24px 0;
+  }
+  .panel[hidden] { display: none; }
+  .sheet-width {
+    width: min(480px, calc(100% - 48px));
+    margin: 0 auto;
+    padding: 8px 24px 24px;
+    background: var(--sheet);
+    border-radius: 22px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .chart-split { grid-template-columns: 1fr; }
+  .insight-grid { grid-template-columns: 1fr 1fr; }
+}

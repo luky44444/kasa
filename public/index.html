@@ -52,6 +52,55 @@
         </div>
       </section>
 
+      <section class="analytics" id="analytics" aria-label="Analytics">
+        <div class="insight-grid">
+          <article class="insight">
+            <p>vs last month spend</p>
+            <b id="vsLast">—</b>
+            <span id="vsLastHint"></span>
+          </article>
+          <article class="insight">
+            <p>Kept from income</p>
+            <b id="saveRate">—</b>
+            <span id="saveRateHint"></span>
+          </article>
+          <article class="insight">
+            <p>Pace to month end</p>
+            <b id="pace">—</b>
+            <span id="paceHint"></span>
+          </article>
+          <article class="insight">
+            <p>Biggest spend</p>
+            <b id="biggest">—</b>
+            <span id="biggestHint"></span>
+          </article>
+        </div>
+        <div class="chart-card">
+          <h2>In and out by day</h2>
+          <div class="chart-frame" id="cashflowChart"></div>
+        </div>
+        <div class="chart-split">
+          <div class="chart-card">
+            <h2>Where the money went</h2>
+            <div class="chart-frame" id="catChart"></div>
+          </div>
+          <div class="chart-card">
+            <h2>Last six months</h2>
+            <div class="chart-frame" id="trendChart"></div>
+          </div>
+        </div>
+        <div class="chart-split">
+          <div class="chart-card">
+            <h2>Spend by weekday</h2>
+            <div class="chart-frame" id="weekdayChart"></div>
+          </div>
+          <div class="chart-card">
+            <h2>More this month</h2>
+            <ul class="facts" id="facts"></ul>
+          </div>
+        </div>
+      </section>
+
       <section class="feed" id="list"></section>
     </main>
 
