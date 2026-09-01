@@ -192,7 +192,7 @@ function timingSafeEqualStr(left: string, right: string) {
 }
 
 export async function registerAccount(emailRaw: string, passwordRaw: string) {
-  reloadLedger();
+  await reloadLedger();
   if (getLedger().account) {
     return { error: "An account already exists. Log in instead.", status: 409 as const };
   }
@@ -220,7 +220,7 @@ export async function registerAccount(emailRaw: string, passwordRaw: string) {
 }
 
 export async function loginAccount(emailRaw: string, passwordRaw: string) {
-  reloadLedger();
+  await reloadLedger();
   const password = typeof passwordRaw === "string" ? passwordRaw.slice(0, 128) : "";
   const account = getLedger().account;
   if (!account) {

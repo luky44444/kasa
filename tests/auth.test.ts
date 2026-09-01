@@ -62,7 +62,7 @@ test("register once, then login opens the ledger without a PIN", async () => {
   const dir = join(tmpdir(), `kasa-auth-${process.hrtime.bigint()}`);
   mkdirSync(dir, { recursive: true });
   process.env.KASA_DATA = join(dir, "kasa.json");
-  reloadLedger();
+  await reloadLedger();
   try {
     assert.equal(gateLocation(), "/register");
     const created = await registerAccount("you@example.com", "correct-horse");
@@ -95,7 +95,7 @@ test("PIN-only leftover cannot register again; login attaches email", async () =
   const dir = join(tmpdir(), `kasa-pin-${process.hrtime.bigint()}`);
   mkdirSync(dir, { recursive: true });
   process.env.KASA_DATA = join(dir, "kasa.json");
-  reloadLedger();
+  await reloadLedger();
   try {
     const salt = randomBytes(16);
     const passwordHash = await hashPassword("1234", salt);
@@ -126,7 +126,7 @@ test("PIN-only leftover cannot register again; login attaches email", async () =
       },
     }));
     await flushLedger();
-    reloadLedger();
+    await reloadLedger();
 
     const blocked = await registerAccount("you@example.com", "correct-horse");
     assert.equal("status" in blocked && blocked.status, 409);
@@ -145,7 +145,7 @@ test("email login unlocks a PIN lock", async () => {
   const dir = join(tmpdir(), `kasa-unlock-login-${process.hrtime.bigint()}`);
   mkdirSync(dir, { recursive: true });
   process.env.KASA_DATA = join(dir, "kasa.json");
-  reloadLedger();
+  await reloadLedger();
   try {
     const created = await registerAccount("you@example.com", "correct-horse");
     assert.equal("token" in created, true);

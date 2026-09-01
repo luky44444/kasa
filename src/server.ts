@@ -28,8 +28,30 @@ import {
   updateSettings,
   updateTransaction,
 } from "./lib/ledger.ts";
-import { flushLedger } from "./lib/store.ts";
+import { flushLedger, ledgerStoreName, reloadLedger } from "./lib/store.ts";
 import { parseAmountToMinor, type Currency, type Direction, type ThemePref } from "./lib/money.ts";
+
+function loadEnvFile() {
+  const path = join(process.cwd(), ".env");
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (!process.env[key]) process.env[key] = value;
+  }
+}
+
+loadEnvFile();
 
 const PORT = Number(process.env.PORT ?? 3000);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -387,6 +409,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
+await reloadLedger();
 server.listen(PORT, HOST, () => {
-  console.log(`Kasa on http://${HOST}:${PORT}`);
+  console.log(`Kasa on http://${HOST}:${PORT} (${ledgerStoreName()})`);
 });
